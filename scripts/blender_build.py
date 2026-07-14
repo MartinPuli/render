@@ -1663,11 +1663,19 @@ def build_scene(scene):
                 or make_concrete_material("Terreno", GROUND_COLOR))
     bm_to_object(bm, "Terreno", piso_mat, coll=C["01_TERRAIN"], merge=0.0)
 
-    # --- Landmark: Puente de la Mujer (si hay pasarela sobre el dique) -> 07 ---
+    # --- Landmarks: SOLO por geofence (nunca regla global). Una pasarela
+    #     cualquiera != Puente de la Mujer; Villa 31 no genera landmarks falsos. ---
     try:
-        add_puente_mujer(scene, C["07_LANDMARKS"])
+        import citylandmarks
+        c = scene.get("center", {})
+        for lm in citylandmarks.landmarks_for_center(
+                float(c.get("lat", 0.0)), float(c.get("lon", 0.0))):
+            fn = globals().get(lm.get("builder", ""))
+            if fn:
+                fn(scene, C["07_LANDMARKS"])
+                print(f"[build] landmark: {lm['name']}")
     except Exception as e:
-        print(f"[build] Puente de la Mujer: {e}")
+        print(f"[build] landmarks: {e}")
 
     # --- Marco del area pedida -> 00_REFERENCE ---
     _add_boundary(C["00_REFERENCE"], minx, miny, maxx, maxy)
