@@ -61,7 +61,11 @@ def main():
 
     if o["street"]:
         bb.setup_world(sky=o["sky"])
-        bb.setup_streetview_camera(o["heading"], o["fov"], o["height"], o["x"], o["y"])
+        import citycamera
+        (sx, sy), moved = citycamera.safe_street_point(scene, o["x"], o["y"])
+        if moved:
+            print(f"[render_view] camara reubicada fuera de edificio -> ({sx:.1f}, {sy:.1f})")
+        bb.setup_streetview_camera(o["heading"], o["fov"], o["height"], sx, sy)
         bb.apply_street_view_settings()   # AgX + look punchy + exposicion fotografica
         bb.setup_compositor(bpy.context.scene, haze_end=460.0,
                             haze_strength=0.7)  # bruma de distancia + vineta
