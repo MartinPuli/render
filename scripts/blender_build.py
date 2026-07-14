@@ -18,6 +18,9 @@ import sys
 import bpy
 import bmesh
 
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from cityroofs import choose_roof_kind  # noqa: E402  (seleccion pura del tipo de techo)
+
 # Carpeta con texturas CC0 (asphalt.jpg, pavement.jpg, concrete.jpg). Si esta
 # seteada y los archivos existen, se usan texturas fotograficas reales en piso y
 # calles. La skill puede bajarlas de PolyHaven y apuntar aca. Si no, colores planos.
@@ -199,6 +202,141 @@ def add_rooftop_detail(bm, footprint, top_z):
     box = [(cx - w / 2, cy - w / 2), (cx + w / 2, cy - w / 2),
            (cx + w / 2, cy + w / 2), (cx - w / 2, cy + w / 2)]
     add_prism(bm, box, top_z, top_z + h)
+
+
+def _bbox_major_x(pts):
+    _, _, sx, sy = _centroid_bbox(pts)
+    return sx >= sy
+
+
+def add_gabled_roof(bm, footprint, top_z):
+    """Techo a dos aguas: caballete (ridge) sobre el eje mayor del bbox."""
+    pts = dedupe_ring(footprint, closed=True)
+    if len(pts) < 3:
+        return
+    cx, cy, sx, sy = _centroid_bbox(pts)
+    roof_h = max(1.5, min(4.5, 0.30 * min(sx, sy)))
+    if sx >= sy:
+        ra, rb = (cx - sx * 0.5, cy), (cx + sx * 0.5, cy)
+    else:
+        ra, rb = (cx, cy - sy * 0.5), (cx, cy + sy * 0.5)
+    try:
+        base = [bm.verts.new((x, y, top_z)) for (x, y) in pts]
+        va = bm.verts.new((ra[0], ra[1], top_z + roof_h))
+        vb = bm.verts.new((rb[0], rb[1], top_z + roof_h))
+    except ValueError:
+        return
+
+    def nearest(x, y):
+        da = (x - ra[0]) ** 2 + (y - ra[1]) ** 2
+        db = (x - rb[0]) ** 2 + (y - rb[1]) ** 2
+        return va if da <= db else vb
+
+    n = len(pts)
+    for i in range(n):
+        j = (i + 1) % n
+        ni, nj = nearest(*pts[i]), nearest(*pts[j])
+        try:
+            if ni is nj:
+                bm.faces.new((base[i], base[j], ni))
+            else:
+                bm.faces.new((base[i], base[j], nj, ni))
+        except ValueError:
+            pass
+
+
+def add_pyramidal_roof(bm, footprint, top_z):
+    """Techo piramidal: todas las aristas suben a un apex central."""
+    pts = dedupe_ring(footprint, closed=True)
+    if len(pts) < 3:
+        return
+    cx, cy, sx, sy = _centroid_bbox(pts)
+    roof_h = max(1.6, min(6.0, 0.5 * min(sx, sy)))
+    try:
+        base = [bm.verts.new((x, y, top_z)) for (x, y) in pts]
+        apex = bm.verts.new((cx, cy, top_z + roof_h))
+    except ValueError:
+        return
+    n = len(pts)
+    for i in range(n):
+        j = (i + 1) % n
+        try:
+            bm.faces.new((base[i], base[j], apex))
+        except ValueError:
+            pass
+
+
+def add_dome_roof(bm, footprint, top_z):
+    """Cupula: icosfera aplanada al bbox (techos redondos, onion, domos)."""
+    pts = dedupe_ring(footprint, closed=True)
+    if len(pts) < 3:
+        return
+    cx, cy, sx, sy = _centroid_bbox(pts)
+    r = max(1.5, 0.5 * min(sx, sy))
+    res = _icosphere(bm, radius=r, subdivisions=2)
+    verts = list(res["verts"])
+    for v in verts:
+        if v.co.z < 0:
+            v.co.z *= 0.10   # media inferior aplastada (queda dentro del edificio)
+        v.co.z *= 0.9
+    bmesh.ops.translate(bm, verts=verts, vec=(cx, cy, top_z))
+
+
+def add_skillion_roof(bm, footprint, top_z):
+    """Techo de una sola agua (mono-pitch): un lado mas alto que el otro."""
+    pts = dedupe_ring(footprint, closed=True)
+    if len(pts) < 3:
+        return
+    major_x = _bbox_major_x(pts)
+    roof_h = max(1.2, min(4.0, 0.25 * min(*_centroid_bbox(pts)[2:])))
+    lo = min((p[0] if major_x else p[1]) for p in pts)
+    hi = max((p[0] if major_x else p[1]) for p in pts)
+    span = (hi - lo) or 1.0
+    try:
+        top = [bm.verts.new((x, y, top_z + roof_h * (((x if major_x else y) - lo) / span)))
+               for (x, y) in pts]
+        bm.faces.new(top)   # plano inclinado
+    except ValueError:
+        return
+
+
+def add_parapet(bm, footprint, top_z, h=1.1):
+    """Parapeto: murete perimetral sobre una azotea plana (torres/edificios)."""
+    pts = dedupe_ring(footprint, closed=True)
+    if len(pts) < 3:
+        return
+    n = len(pts)
+    try:
+        low = [bm.verts.new((x, y, top_z)) for (x, y) in pts]
+        high = [bm.verts.new((x, y, top_z + h)) for (x, y) in pts]
+    except ValueError:
+        return
+    for i in range(n):
+        j = (i + 1) % n
+        try:
+            bm.faces.new((low[i], low[j], high[j], high[i]))
+        except ValueError:
+            pass
+
+
+def build_roof(kind, footprint, top_z, house_bm, flat_bm):
+    """Construye el techo `kind` (de cityroofs.choose_roof_kind) en el bmesh que
+    corresponde: aguas -> teja (house_bm); azotea/cupula -> gris (flat_bm)."""
+    if kind == "hipped":
+        add_hip_roof(house_bm, footprint, top_z)
+    elif kind == "gabled":
+        add_gabled_roof(house_bm, footprint, top_z)
+    elif kind == "pyramidal":
+        add_pyramidal_roof(house_bm, footprint, top_z)
+    elif kind == "skillion":
+        add_skillion_roof(house_bm, footprint, top_z)
+    elif kind == "dome":
+        add_dome_roof(flat_bm, footprint, top_z)
+    elif kind == "parapet":
+        add_parapet(flat_bm, footprint, top_z)
+        add_rooftop_detail(flat_bm, footprint, top_z)
+    else:  # flat
+        add_rooftop_detail(flat_bm, footprint, top_z)
 
 
 LANDMARK_TYPES = {"obelisk", "tower", "monument", "mast", "chimney"}
@@ -1457,7 +1595,10 @@ def build_scene(scene):
             base = float(b.get("min_height", 0.0))
             top = float(b["height"])
             add_prism(bm, b["footprint"], base, top)
-            add_rooftop_detail(roof_flat_bm, b["footprint"], top)
+            fp0 = b["footprint"][0]
+            kind = choose_roof_kind(b.get("roof_shape"), top - base,
+                                    fp0[0] * 1.3 + fp0[1] * 2.7)
+            build_roof(kind, b["footprint"], top, roof_house_bm, roof_flat_bm)
         _bevel(bm)
         bm_to_object(bm, f"Torre_vidrio_{idx}",
                      make_glass_material(f"glass_{idx}", GLASS_TINTS[idx]),
@@ -1470,10 +1611,10 @@ def build_scene(scene):
             base = float(b.get("min_height", 0.0))
             top = float(b["height"])
             add_prism(bm, b["footprint"], base, top)
-            if (top - base) <= ROOF_SMALL_MAX_H:
-                add_hip_roof(roof_house_bm, b["footprint"], top)
-            else:
-                add_rooftop_detail(roof_flat_bm, b["footprint"], top)
+            fp0 = b["footprint"][0]
+            kind = choose_roof_kind(b.get("roof_shape"), top - base,
+                                    fp0[0] * 1.3 + fp0[1] * 2.7)
+            build_roof(kind, b["footprint"], top, roof_house_bm, roof_flat_bm)
         _bevel(bm)
         bm_to_object(bm, f"Edificio_{i}", make_windowed_material(f"bld_{i}", k),
                      coll=C["02_BUILDINGS"])
