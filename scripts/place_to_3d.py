@@ -448,6 +448,19 @@ out geom;
 
 
 def fetch_overpass(query):
+    # Cache local en disco (F4): evita re-consultar Overpass en corridas repetidas.
+    # Degrada silenciosamente si citycache no esta disponible.
+    ckey = _cache = None
+    try:
+        import citycache as _cache
+        ckey = _cache.key_hash(query)
+        hit = _cache.get(ckey)
+        if hit:
+            print("   (Overpass: respuesta desde cache local)")
+            return json.loads(hit)
+    except Exception:
+        _cache = ckey = None
+
     last_err = None
     for endpoint in OVERPASS_ENDPOINTS:
         try:
@@ -456,6 +469,11 @@ def fetch_overpass(query):
                 headers={"User-Agent": USER_AGENT}, timeout=90,
             )
             if r.status_code == 200:
+                if ckey and _cache:
+                    try:
+                        _cache.put(ckey, r.text)
+                    except Exception:
+                        pass
                 return r.json()
             last_err = f"HTTP {r.status_code} en {endpoint}"
             print(f"   (Overpass {last_err}, probando otro servidor...)")
