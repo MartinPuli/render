@@ -140,6 +140,42 @@ def add_rooftop_detail(bm, footprint, top_z):
     add_prism(bm, box, top_z, top_z + h)
 
 
+LANDMARK_TYPES = {"obelisk", "tower", "monument", "mast", "chimney"}
+
+
+def add_spire(bm, footprint, base_z, top_z):
+    """Aguja/torre afinada con punta piramidal (obeliscos, monumentos, mastiles)."""
+    pts = dedupe_ring(footprint, closed=True)
+    if len(pts) < 3:
+        return
+    cx, cy, sx, sy = _centroid_bbox(pts)
+    shaft_top = base_z + (top_z - base_z) * 0.85
+    taper = 0.25  # se afina hacia arriba
+    try:
+        bottom = [bm.verts.new((x, y, base_z)) for (x, y) in pts]
+        ring = [bm.verts.new((cx + (x - cx) * (1 - taper),
+                              cy + (y - cy) * (1 - taper), shaft_top))
+                for (x, y) in pts]
+        apex = bm.verts.new((cx, cy, top_z))
+    except ValueError:
+        return
+    n = len(pts)
+    for i in range(n):
+        j = (i + 1) % n
+        try:
+            bm.faces.new((bottom[i], bottom[j], ring[j], ring[i]))  # fuste
+        except ValueError:
+            pass
+        try:
+            bm.faces.new((ring[i], ring[j], apex))                  # punta
+        except ValueError:
+            pass
+    try:
+        bm.faces.new(bottom)  # base
+    except ValueError:
+        pass
+
+
 def add_bridge_piers(bm, path, deck_z, spacing=18.0, size=1.4):
     """Agrega pilares (columnas) desde el piso hasta el tablero de un puente elevado."""
     pts = dedupe_ring(path, closed=False)
@@ -248,6 +284,9 @@ def build_scene(scene):
         for b in items:
             base = float(b.get("min_height", 0.0))
             top = float(b["height"])
+            if b.get("type") in LANDMARK_TYPES:
+                add_spire(bm, b["footprint"], base, top)   # aguja, sin techo de casa
+                continue
             add_prism(bm, b["footprint"], base, top)
             if (top - base) <= ROOF_SMALL_MAX_H:
                 add_hip_roof(roof_house_bm, b["footprint"], top)
