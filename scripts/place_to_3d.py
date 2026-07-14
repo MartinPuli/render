@@ -273,34 +273,39 @@ def bbox_around(lat0, lon0, radius_m):
 # 3) OpenStreetMap: alturas, colores y parseo
 # ---------------------------------------------------------------------------
 
-# Colores base por tipo de edificio (RGB 0..1, gamma sRGB)
+# Colores base por tipo de edificio (RGB 0..1, gamma sRGB). Paleta colorida.
 BUILDING_COLORS = {
-    "house":        (0.86, 0.80, 0.68),
-    "detached":     (0.86, 0.80, 0.68),
-    "residential":  (0.82, 0.80, 0.76),
-    "apartments":   (0.78, 0.79, 0.82),
-    "commercial":   (0.70, 0.74, 0.80),
-    "retail":       (0.80, 0.72, 0.66),
-    "office":       (0.68, 0.72, 0.78),
-    "industrial":   (0.62, 0.62, 0.60),
-    "warehouse":    (0.62, 0.62, 0.60),
-    "hotel":        (0.74, 0.70, 0.78),
-    "church":       (0.85, 0.82, 0.72),
-    "cathedral":    (0.85, 0.82, 0.72),
-    "school":       (0.80, 0.76, 0.66),
-    "university":   (0.80, 0.76, 0.66),
-    "hospital":     (0.86, 0.84, 0.84),
-    "public":       (0.80, 0.80, 0.78),
-    "garage":       (0.66, 0.66, 0.64),
-    "roof":         (0.72, 0.72, 0.72),
-    "_default":     (0.80, 0.79, 0.77),
+    "house":        (0.87, 0.62, 0.45),  # terracota / adobe
+    "detached":     (0.85, 0.67, 0.49),
+    "residential":  (0.82, 0.69, 0.53),
+    "apartments":   (0.60, 0.69, 0.80),  # azul empolvado
+    "commercial":   (0.46, 0.67, 0.66),  # verde azulado
+    "retail":       (0.88, 0.57, 0.49),  # coral
+    "office":       (0.54, 0.60, 0.76),  # azul pizarra
+    "industrial":   (0.68, 0.64, 0.58),
+    "warehouse":    (0.68, 0.64, 0.58),
+    "hotel":        (0.73, 0.55, 0.71),  # malva
+    "church":       (0.90, 0.83, 0.62),  # crema dorado
+    "cathedral":    (0.90, 0.83, 0.62),
+    "school":       (0.90, 0.68, 0.44),  # naranja calido
+    "university":   (0.87, 0.71, 0.50),
+    "hospital":     (0.88, 0.75, 0.72),
+    "public":       (0.74, 0.72, 0.82),
+    "garage":       (0.66, 0.64, 0.60),
+    "roof":         (0.70, 0.48, 0.38),
+    "_default":     (0.82, 0.72, 0.58),
 }
 
-# Variacion calida para edificios sin tipo (para que la ciudad no salga toda blanca)
+# Paleta colorida para edificios sin tipo (la mayoria). Tonos medios y variados.
 VARIED_NEUTRALS = [
-    (0.87, 0.82, 0.72), (0.82, 0.80, 0.74), (0.80, 0.81, 0.81),
-    (0.85, 0.79, 0.70), (0.78, 0.77, 0.73), (0.84, 0.83, 0.78),
-    (0.83, 0.76, 0.68), (0.76, 0.78, 0.80),
+    (0.87, 0.58, 0.46),  # terracota
+    (0.90, 0.75, 0.45),  # ocre
+    (0.60, 0.73, 0.55),  # salvia
+    (0.55, 0.67, 0.80),  # celeste
+    (0.83, 0.64, 0.69),  # rosa viejo
+    (0.47, 0.69, 0.67),  # verde azulado
+    (0.74, 0.68, 0.85),  # lavanda
+    (0.91, 0.83, 0.61),  # crema
 ]
 
 
