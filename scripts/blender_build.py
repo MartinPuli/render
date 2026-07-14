@@ -12,10 +12,24 @@ Coordenadas del scene.json: metros, X=este, Y=norte, Z=arriba. 1 unidad Blender 
 """
 import json
 import math
+import os
 import sys
 
 import bpy
 import bmesh
+
+# Carpeta con texturas CC0 (asphalt.jpg, pavement.jpg, concrete.jpg). Si esta
+# seteada y los archivos existen, se usan texturas fotograficas reales en piso y
+# calles. La skill puede bajarlas de PolyHaven y apuntar aca. Si no, colores planos.
+TEXTURE_DIR = os.environ.get("MAPS3D_TEXTURES", "")
+
+
+def _tex(name):
+    if TEXTURE_DIR:
+        p = os.path.join(TEXTURE_DIR, name)
+        if os.path.isfile(p):
+            return p
+    return None
 
 # --- Parametros de render / camara ---
 RES_X, RES_Y = 1280, 960
@@ -346,6 +360,33 @@ def make_windowed_material(name, wall_rgb):
             bsdf.inputs["Roughness"].default_value = 0.6
     except Exception:
         bsdf.inputs["Base Color"].default_value = (wall_rgb[0], wall_rgb[1], wall_rgb[2], 1.0)
+    return mat
+
+
+def make_textured_material(name, image_path, tile_m=4.0, roughness=0.9):
+    """Material con textura de imagen tileada a escala real (Position del mundo)."""
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    if not bsdf:
+        return mat
+    try:
+        img = bpy.data.images.load(image_path, check_existing=True)
+        tex = nt.nodes.new("ShaderNodeTexImage")
+        tex.image = img
+        tex.extension = "REPEAT"
+        geom = nt.nodes.new("ShaderNodeNewGeometry")
+        mapping = nt.nodes.new("ShaderNodeMapping")
+        s = 1.0 / max(0.5, tile_m)
+        mapping.inputs["Scale"].default_value = (s, s, s)
+        nt.links.new(geom.outputs["Position"], mapping.inputs["Vector"])
+        nt.links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
+        nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+        if "Roughness" in bsdf.inputs:
+            bsdf.inputs["Roughness"].default_value = roughness
+    except Exception:
+        bsdf.inputs["Base Color"].default_value = (0.5, 0.5, 0.5, 1.0)
     return mat
 
 
