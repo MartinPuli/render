@@ -62,3 +62,84 @@ def test_parse_height_levels():
 def test_parse_height_explicit():
     h, _ = p.parse_height({"height": "25 m"})
     assert abs(h - 25.0) < 1e-6
+
+
+# --- F1b: camara nunca dentro de un edificio ---
+def test_camera_moves_out_of_building():
+    import citycamera as cam
+    scene = {
+        "buildings": [{"footprint": [(-10, -10), (10, -10), (10, 10), (-10, 10)]}],
+        "roads": [{"path": [[0, -40], [0, -15]], "z": 0.06}],
+    }
+    (x, y), moved = cam.safe_street_point(scene, 0.0, 0.0)  # origen dentro del edificio
+    assert moved
+    assert not cam.inside_any_building(scene["buildings"], x, y)
+
+
+def test_camera_stays_if_already_safe():
+    import citycamera as cam
+    scene = {"buildings": [{"footprint": [(-10, -10), (10, -10), (10, 10), (-10, 10)]}],
+             "roads": []}
+    (x, y), moved = cam.safe_street_point(scene, 50.0, 50.0)  # afuera
+    assert not moved and (x, y) == (50.0, 50.0)
+
+
+# --- F2a: procedencia + confianza por edificio ---
+def test_height_source_classification():
+    assert p.height_source({"height": "30 m"}) == "explicit"
+    assert p.height_source({"building:levels": "5"}) == "levels"
+    assert p.height_source({"building": "yes"}) == "default"
+
+
+def test_confidence_ordering():
+    c_expl = p.building_confidence({"height": "30 m"})
+    c_lvl = p.building_confidence({"building:levels": "5"})
+    c_def = p.building_confidence({"building": "yes"})
+    assert c_expl > c_lvl > c_def          # mas dato OSM => mas confianza
+    assert 0.0 <= c_def <= c_expl <= 1.0
+    # el nombre aporta un plus de confianza
+    assert p.building_confidence({"height": "30 m", "name": "Torre X"}) > c_expl
+
+
+# --- F2c: variedad de techos por edificio (roof:shape + fallback) ---
+def test_roof_tag_respected():
+    import cityroofs as cr
+    assert cr.choose_roof_kind("gabled", 8) == "gabled"
+    assert cr.choose_roof_kind("onion", 40) == "dome"      # onion -> dome
+    assert cr.choose_roof_kind("flat", 40) == "flat"
+    assert cr.choose_roof_kind("skillion", 6) == "skillion"
+    assert cr.choose_roof_kind("mansard", 9) == "hipped"
+
+
+def test_roof_default_variety():
+    import cityroofs as cr
+    # bajos sin tag: aguas variadas (al menos 2 tipos distintos entre semillas)
+    low = {cr.choose_roof_kind(None, 8, seed=s * 3.1) for s in range(80)}
+    assert low <= set(cr.ROOF_KINDS)
+    assert len(low & {"hipped", "gabled", "pyramidal", "skillion"}) >= 2
+    # altos sin tag: azotea (parapeto o lisa), nunca aguas
+    tall = {cr.choose_roof_kind(None, 45, seed=s * 2.3) for s in range(80)}
+    assert tall <= {"parapet", "flat"}
+
+
+# --- F3a: perfiles arquitectonicos ---
+def test_profile_classification_synthetic():
+    import cityprofiles as cp
+    towers = [{"height": 90, "roof_shape": None, "type": "yes"} for _ in range(20)]
+    assert cp.classify_profile(towers) == "modern_towers"
+    historic = [{"height": 7, "roof_shape": "gabled", "type": "house"} for _ in range(20)]
+    assert cp.classify_profile(historic) == "historic_center"
+    informal = [{"height": 4, "roof_shape": None, "type": "yes"} for _ in range(20)]
+    assert cp.classify_profile(informal) == "informal_dense"
+    assert cp.classify_profile([]) == "mixed"
+    d = cp.profile_defaults("modern_towers")
+    assert d["roof_bias"] == "flat" and d["default_height"] > 15
+
+
+def test_roof_bias_applies_without_tag():
+    import cityroofs as cr
+    # perfil historico -> sesgo gabled en edificios bajos sin tag
+    kinds = {cr.choose_roof_kind(None, 8, seed=s * 1.7, bias="gabled") for s in range(40)}
+    assert "gabled" in kinds
+    # el tag OSM siempre gana sobre el sesgo
+    assert cr.choose_roof_kind("hipped", 8, bias="gabled") == "hipped"
