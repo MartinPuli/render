@@ -197,11 +197,17 @@ def main():
         pass
     scn.render.resolution_x, scn.render.resolution_y = o["res"]
     bb.apply_street_view_settings()
-    # Bruma de distancia fuerte: disuelve los bordes cortados de los tiles en el
-    # cielo y da perspectiva aerea (aerial perspective) — el defecto #1 del evaluador.
-    bb.setup_compositor(scn, haze_color=(0.68, 0.74, 0.82),
+    # Exposicion algo mas baja -> cielo azul mas saturado (los tiles ya traen la
+    # luz horneada, aguantan). Da "color" al cielo en vez del gris lavado.
+    try:
+        scn.view_settings.exposure = -1.0
+    except Exception:
+        pass
+    # Bruma de distancia (aerial perspective) que disuelve los bordes de los tiles;
+    # el CIELO queda excluido (ver setup_compositor) para conservar el azul + nubes.
+    bb.setup_compositor(scn, haze_color=(0.56, 0.68, 0.85),
                         haze_start=R * 0.4, haze_end=R * 1.9,
-                        haze_strength=0.92, vignette=0.16)
+                        haze_strength=0.9, vignette=0.16)
 
     out_dir = Path(o["out"]); out_dir.mkdir(parents=True, exist_ok=True)
 

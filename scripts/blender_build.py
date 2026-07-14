@@ -1171,10 +1171,27 @@ def setup_compositor(scn=None, haze_color=(0.60, 0.70, 0.84), haze_start=70.0,
             except Exception:
                 pass
             nt.links.new(depth, mr.inputs["Value"])
+            # Excluir el CIELO de la bruma: el fondo tiene profundidad enorme y si
+            # no lo enmascaramos, la bruma le tapa el HDRI (azul + nubes) con un
+            # gris plano. Mascara: 1 en la geometria, 0 en el cielo (depth grande).
+            skym = nt.nodes.new("CompositorNodeMapRange")
+            skym.inputs["From Min"].default_value = haze_end * 2.5
+            skym.inputs["From Max"].default_value = haze_end * 4.0
+            skym.inputs["To Min"].default_value = 1.0
+            skym.inputs["To Max"].default_value = 0.0
+            try:
+                skym.use_clamp = True
+            except Exception:
+                pass
+            nt.links.new(depth, skym.inputs["Value"])
+            hfac = nt.nodes.new("CompositorNodeMath")
+            hfac.operation = "MULTIPLY"
+            nt.links.new(mr.outputs["Value"], hfac.inputs[0])
+            nt.links.new(skym.outputs["Value"], hfac.inputs[1])
             mix = nt.nodes.new("CompositorNodeMixRGB")
             mix.blend_type = "MIX"
             mix.inputs[2].default_value = (haze_color[0], haze_color[1], haze_color[2], 1.0)
-            nt.links.new(mr.outputs["Value"], mix.inputs[0])
+            nt.links.new(hfac.outputs["Value"], mix.inputs[0])
             nt.links.new(last, mix.inputs[1])
             last = mix.outputs["Image"]
         if vignette > 0:
