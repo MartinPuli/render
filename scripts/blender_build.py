@@ -87,6 +87,28 @@ def add_flat_polygon(bm, poly, z):
         pass
 
 
+def add_bridge_piers(bm, path, deck_z, spacing=18.0, size=1.4):
+    """Agrega pilares (columnas) desde el piso hasta el tablero de un puente elevado."""
+    pts = dedupe_ring(path, closed=False)
+    s = size / 2.0
+    placed = 0
+    for i in range(len(pts) - 1):
+        x1, y1 = pts[i]
+        x2, y2 = pts[i + 1]
+        dx, dy = x2 - x1, y2 - y1
+        L = math.hypot(dx, dy)
+        if L < 1e-6:
+            continue
+        d = 0.0
+        while d <= L and placed < 40:
+            t = d / L
+            cx, cy = x1 + dx * t, y1 + dy * t
+            box = [(cx - s, cy - s), (cx + s, cy - s), (cx + s, cy + s), (cx - s, cy + s)]
+            add_prism(bm, box, 0.0, deck_z)
+            placed += 1
+            d += spacing
+
+
 def add_road_strip(bm, path, width, z):
     """Agrega una calle como tira de quads a lo largo de la polilinea."""
     hw = width / 2.0
@@ -195,10 +217,13 @@ def build_scene(scene):
     for i, (k, items) in enumerate(road_groups.items()):
         bm = bmesh.new()
         for r in items:
+            z = float(r.get("z", 0.06))
             # z levemente distinto por calle => evita z-fighting entre calles superpuestas
             p0 = r["path"][0]
             jitter = 0.001 * (int(abs(p0[0] * 5.1 + p0[1] * 9.7)) % 40)
-            add_road_strip(bm, r["path"], float(r["width"]), 0.06 + jitter)
+            add_road_strip(bm, r["path"], float(r["width"]), z + jitter)
+            if z > 1.0:  # es un puente elevado -> agregar pilares hasta el piso
+                add_bridge_piers(bm, r["path"], z)
         mat = make_material(f"road_{i}", k, roughness=0.9, specular=0.08)
         bm_to_object(bm, f"Calles_{i}", mat)
 

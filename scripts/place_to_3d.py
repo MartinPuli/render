@@ -327,6 +327,9 @@ ROAD_WIDTH = {
 }
 ROAD_COLOR = (0.28, 0.28, 0.30)
 PED_COLOR = (0.55, 0.52, 0.48)
+RAIL_COLOR = (0.32, 0.24, 0.19)   # vias de tren (marron oxido)
+BRIDGE_COLOR = (0.42, 0.40, 0.40)  # tablero del puente
+BRIDGE_Z = 5.0                     # altura a la que se eleva un puente (bridge=yes)
 
 
 def _hex_to_rgb(s):
@@ -399,6 +402,7 @@ def build_overpass_query(south, west, north, east):
   way["building"]({b});
   relation["building"]["type"="multipolygon"]({b});
   way["highway"]({b});
+  way["railway"~"^(rail|light_rail|subway|tram|narrow_gauge|monorail)$"]({b});
   way["natural"="water"]({b});
   relation["natural"="water"]({b});
   way["waterway"="riverbank"]({b});
@@ -462,10 +466,19 @@ def parse_osm(data, project):
         pts = to_xy(ring_lonlat)
         if len(pts) < 2:
             return
-        hw = tags.get("highway", "_default")
-        width = ROAD_WIDTH.get(hw, ROAD_WIDTH["_default"])
-        color = PED_COLOR if hw in ("footway", "path", "pedestrian", "cycleway", "track") else ROAD_COLOR
-        roads.append({"path": pts, "width": width, "color": list(color), "type": hw})
+        is_bridge = tags.get("bridge") in ("yes", "viaduct", "true", "1")
+        if "railway" in tags:
+            width, color, rtype, z = 4.5, RAIL_COLOR, "rail:" + tags["railway"], 0.05
+        else:
+            hw = tags.get("highway", "_default")
+            width = ROAD_WIDTH.get(hw, ROAD_WIDTH["_default"])
+            color = PED_COLOR if hw in ("footway", "path", "pedestrian", "cycleway", "track") else ROAD_COLOR
+            rtype, z = hw, 0.06
+        if is_bridge:
+            z = BRIDGE_Z                       # elevar el tablero del puente
+            color = BRIDGE_COLOR
+            width = max(width, 8.0)
+        roads.append({"path": pts, "width": width, "color": list(color), "type": rtype, "z": z})
 
     def add_area(tags, ring_lonlat, kind):
         pts = to_xy(ring_lonlat)
@@ -490,7 +503,7 @@ def parse_osm(data, project):
                         add_building(tags, _ring_from_geometry(mem["geometry"]))
             continue
 
-        if "highway" in tags and etype == "way" and el.get("geometry"):
+        if ("highway" in tags or "railway" in tags) and etype == "way" and el.get("geometry"):
             add_road(tags, _ring_from_geometry(el["geometry"]))
             continue
 
