@@ -333,15 +333,44 @@ def build_scene(scene):
 # Luz, mundo, camara, render
 # ---------------------------------------------------------------------------
 
-def setup_world():
+def setup_world(sky=False):
+    """sky=True usa un cielo procedural Nishita (realista, para vistas a nivel de
+    calle). sky=False deja un cielo plano azul (mejor para la maqueta aérea)."""
     scn = bpy.context.scene
     world = bpy.data.worlds.new("Cielo")
     scn.world = world
     world.use_nodes = True
-    bg = world.node_tree.nodes.get("Background")
-    if bg:
-        bg.inputs[0].default_value = (0.62, 0.74, 0.92, 1.0)
-        bg.inputs[1].default_value = WORLD_STRENGTH
+    nt = world.node_tree
+    bg = nt.nodes.get("Background")
+    if not bg:
+        return
+    if sky:
+        try:
+            sky_node = nt.nodes.new("ShaderNodeTexSky")
+            # El nombre del cielo atmosferico cambia entre versiones de Blender
+            # (Nishita en 4.x; Multiple/Single Scattering en 5.x).
+            for stype in ("MULTIPLE_SCATTERING", "NISHITA", "SINGLE_SCATTERING",
+                          "HOSEK_WILKIE"):
+                try:
+                    sky_node.sky_type = stype
+                    break
+                except TypeError:
+                    continue
+            for attr, val in (("sun_elevation", math.radians(38)),
+                              ("sun_rotation", math.radians(40)),
+                              ("altitude", 300.0)):
+                if hasattr(sky_node, attr):
+                    try:
+                        setattr(sky_node, attr, val)
+                    except Exception:
+                        pass
+            nt.links.new(sky_node.outputs[0], bg.inputs[0])
+            bg.inputs[1].default_value = 0.35
+            return
+        except Exception:
+            pass
+    bg.inputs[0].default_value = (0.62, 0.74, 0.92, 1.0)
+    bg.inputs[1].default_value = WORLD_STRENGTH
 
 
 def setup_sun():

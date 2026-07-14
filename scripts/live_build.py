@@ -37,21 +37,37 @@ def build(scene_path, heading=None, sv_xy=(0.0, 0.0), height=2.5, fov=90.0,
         bpy.ops.wm.read_factory_settings(use_empty=True)
 
     cx, cy, R = bb.build_scene(scene)
-    bb.setup_world()
-    bb.setup_sun()
+    street_level = heading is not None
+    bb.setup_world(sky=street_level)   # cielo fisico realista a nivel de calle
+    if not street_level:
+        bb.setup_sun()                 # con cielo fisico el sol ya viene del cielo
 
-    if heading is not None:
+    if street_level:
         bb.setup_streetview_camera(float(heading), float(fov), float(height),
                                    float(sv_xy[0]), float(sv_xy[1]))
     else:
         bb.setup_camera(cx, cy, R)
 
     if standard_view:
-        try:
-            bpy.context.scene.view_settings.view_transform = "Standard"
-            bpy.context.scene.view_settings.exposure = bb.EXPOSURE
-        except Exception:
-            pass
+        vs = bpy.context.scene.view_settings
+        if street_level:
+            # Tonemapping fotografico para el alto rango del cielo fisico
+            for vt in ("AgX", "Filmic", "Standard"):
+                try:
+                    vs.view_transform = vt
+                    break
+                except TypeError:
+                    continue
+            try:
+                vs.exposure = -1.8
+            except Exception:
+                pass
+        else:
+            try:
+                vs.view_transform = "Standard"
+                vs.exposure = bb.EXPOSURE
+            except Exception:
+                pass
 
     return {
         "buildings": len(scene.get("buildings", [])),
