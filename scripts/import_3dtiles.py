@@ -118,16 +118,23 @@ def main():
          (cx + s, cy + s, base_z), (cx - s, cy + s, base_z)], [], [(0, 1, 2, 3)])
     bmesh_base.update()
     base_ob = bpy.data.objects.new("Base_horizonte", bmesh_base)
-    base_ob.data.materials.append(bb.make_material("base_horizonte", (0.20, 0.23, 0.22),
-                                                    roughness=0.92, specular=0.05))
+    # color del plano ~ tono de bruma/horizonte para que el borde lejano se funda
+    base_ob.data.materials.append(bb.make_material("base_horizonte", (0.60, 0.68, 0.78),
+                                                    roughness=0.95, specular=0.03))
     coll.objects.link(base_ob)
 
     bb.setup_world(sky=True)
-    if not bb.using_hdri():
-        sun = bpy.data.lights.new("Sol", "SUN"); sun.energy = 2.2
-        so = bpy.data.objects.new("Sol", sun)
-        so.rotation_euler = (math.radians(52), math.radians(8), math.radians(150))
-        bpy.context.scene.collection.objects.link(so)
+    # Sol direccional (suave si hay HDRI): agrega sombras de contacto y contraste
+    # sin duplicar la luz ya horneada en las texturas de los tiles.
+    sun = bpy.data.lights.new("Sol", "SUN")
+    sun.energy = 0.8 if bb.using_hdri() else 2.2
+    try:
+        sun.angle = 0.05
+    except Exception:
+        pass
+    so = bpy.data.objects.new("Sol", sun)
+    so.rotation_euler = (math.radians(50), math.radians(8), math.radians(150))
+    bpy.context.scene.collection.objects.link(so)
 
     scn = bpy.context.scene
     scn.render.engine = "CYCLES"
@@ -141,9 +148,9 @@ def main():
     bb.apply_street_view_settings()
     # Bruma de distancia fuerte: disuelve los bordes cortados de los tiles en el
     # cielo y da perspectiva aerea (aerial perspective) — el defecto #1 del evaluador.
-    bb.setup_compositor(scn, haze_color=(0.66, 0.73, 0.82),
-                        haze_start=R * 0.6, haze_end=R * 2.2,
-                        haze_strength=0.85, vignette=0.18)
+    bb.setup_compositor(scn, haze_color=(0.68, 0.74, 0.82),
+                        haze_start=R * 0.4, haze_end=R * 1.9,
+                        haze_strength=0.92, vignette=0.16)
 
     out_dir = Path(o["out"]); out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -172,7 +179,7 @@ def main():
         print(f"[3dtiles] render {tag} -> {p}")
 
     render_cam("Cam_aerea", 34, 135, 2.0, "aerial", frame=0.95)
-    render_cam("Cam_oblicua", 14, 205, 1.7, "oblique", frame=0.9)
+    render_cam("Cam_oblicua", 15, 205, 1.55, "oblique", frame=0.8)
     # vista baja (eye-level): mismo esquema que funciona, angulo bajo y cercano,
     # apuntada al nivel del suelo local (mediana Z cerca del centro)
     render_cam("Cam_baja", 7, 150, 0.62, "street", frame=1.15, tgt_z=center_ground)
