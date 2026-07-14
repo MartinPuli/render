@@ -82,3 +82,20 @@ def test_camera_stays_if_already_safe():
              "roads": []}
     (x, y), moved = cam.safe_street_point(scene, 50.0, 50.0)  # afuera
     assert not moved and (x, y) == (50.0, 50.0)
+
+
+# --- F2a: procedencia + confianza por edificio ---
+def test_height_source_classification():
+    assert p.height_source({"height": "30 m"}) == "explicit"
+    assert p.height_source({"building:levels": "5"}) == "levels"
+    assert p.height_source({"building": "yes"}) == "default"
+
+
+def test_confidence_ordering():
+    c_expl = p.building_confidence({"height": "30 m"})
+    c_lvl = p.building_confidence({"building:levels": "5"})
+    c_def = p.building_confidence({"building": "yes"})
+    assert c_expl > c_lvl > c_def          # mas dato OSM => mas confianza
+    assert 0.0 <= c_def <= c_expl <= 1.0
+    # el nombre aporta un plus de confianza
+    assert p.building_confidence({"height": "30 m", "name": "Torre X"}) > c_expl
