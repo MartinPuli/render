@@ -243,6 +243,46 @@ def make_material(name, rgb, roughness=0.85, metallic=0.0, specular=0.15):
     return mat
 
 
+def make_windowed_material(name, wall_rgb):
+    """Material de fachada con ventanas procedurales (grilla de vidrio en la pared).
+    Usa coordenadas del mundo (metros) para que las ventanas queden a escala real."""
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    if not bsdf:
+        return mat
+    try:
+        geom = nt.nodes.new("ShaderNodeNewGeometry")
+        sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+        addn = nt.nodes.new("ShaderNodeMath"); addn.operation = "ADD"
+        comb = nt.nodes.new("ShaderNodeCombineXYZ")
+        brick = nt.nodes.new("ShaderNodeTexBrick")
+        # Coordenada de fachada: X_horizontal = X+Y (avanza sobre cualquier pared),
+        # Y_vertical = Z. Asi el patron es una grilla en la pared, no rayas.
+        nt.links.new(geom.outputs["Position"], sep.inputs["Vector"])
+        nt.links.new(sep.outputs["X"], addn.inputs[0])
+        nt.links.new(sep.outputs["Y"], addn.inputs[1])
+        nt.links.new(addn.outputs["Value"], comb.inputs["X"])
+        nt.links.new(sep.outputs["Z"], comb.inputs["Y"])
+        nt.links.new(comb.outputs["Vector"], brick.inputs["Vector"])
+        # ventanas = vidrio oscuro azulado; "mortar" = color de la pared
+        brick.inputs["Color1"].default_value = (0.10, 0.13, 0.18, 1.0)
+        brick.inputs["Color2"].default_value = (0.14, 0.18, 0.25, 1.0)
+        brick.inputs["Mortar"].default_value = (wall_rgb[0], wall_rgb[1], wall_rgb[2], 1.0)
+        params = {"Scale": 1.0, "Mortar Size": 0.28, "Mortar Smooth": 0.1,
+                  "Bias": 0.0, "Brick Width": 3.4, "Row Height": 3.0}
+        for nm, val in params.items():
+            if nm in brick.inputs:
+                brick.inputs[nm].default_value = val
+        nt.links.new(brick.outputs["Color"], bsdf.inputs["Base Color"])
+        if "Roughness" in bsdf.inputs:
+            bsdf.inputs["Roughness"].default_value = 0.6
+    except Exception:
+        bsdf.inputs["Base Color"].default_value = (wall_rgb[0], wall_rgb[1], wall_rgb[2], 1.0)
+    return mat
+
+
 def bm_to_object(bm, name, mat):
     try:
         bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
@@ -300,7 +340,7 @@ def build_scene(scene):
                                 clamp_overlap=True)
             except Exception:
                 pass
-        mat = make_material(f"bld_{i}", k, roughness=0.8, specular=0.14)
+        mat = make_windowed_material(f"bld_{i}", k)   # fachada con ventanas
         bm_to_object(bm, f"Edificios_{i}", mat)
     if len(roof_house_bm.faces) > 0:
         bm_to_object(roof_house_bm, "Techos_teja",
