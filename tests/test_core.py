@@ -99,3 +99,24 @@ def test_confidence_ordering():
     assert 0.0 <= c_def <= c_expl <= 1.0
     # el nombre aporta un plus de confianza
     assert p.building_confidence({"height": "30 m", "name": "Torre X"}) > c_expl
+
+
+# --- F2c: variedad de techos por edificio (roof:shape + fallback) ---
+def test_roof_tag_respected():
+    import cityroofs as cr
+    assert cr.choose_roof_kind("gabled", 8) == "gabled"
+    assert cr.choose_roof_kind("onion", 40) == "dome"      # onion -> dome
+    assert cr.choose_roof_kind("flat", 40) == "flat"
+    assert cr.choose_roof_kind("skillion", 6) == "skillion"
+    assert cr.choose_roof_kind("mansard", 9) == "hipped"
+
+
+def test_roof_default_variety():
+    import cityroofs as cr
+    # bajos sin tag: aguas variadas (al menos 2 tipos distintos entre semillas)
+    low = {cr.choose_roof_kind(None, 8, seed=s * 3.1) for s in range(80)}
+    assert low <= set(cr.ROOF_KINDS)
+    assert len(low & {"hipped", "gabled", "pyramidal", "skillion"}) >= 2
+    # altos sin tag: azotea (parapeto o lisa), nunca aguas
+    tall = {cr.choose_roof_kind(None, 45, seed=s * 2.3) for s in range(80)}
+    assert tall <= {"parapet", "flat"}
