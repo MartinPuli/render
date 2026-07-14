@@ -120,3 +120,26 @@ def test_roof_default_variety():
     # altos sin tag: azotea (parapeto o lisa), nunca aguas
     tall = {cr.choose_roof_kind(None, 45, seed=s * 2.3) for s in range(80)}
     assert tall <= {"parapet", "flat"}
+
+
+# --- F3a: perfiles arquitectonicos ---
+def test_profile_classification_synthetic():
+    import cityprofiles as cp
+    towers = [{"height": 90, "roof_shape": None, "type": "yes"} for _ in range(20)]
+    assert cp.classify_profile(towers) == "modern_towers"
+    historic = [{"height": 7, "roof_shape": "gabled", "type": "house"} for _ in range(20)]
+    assert cp.classify_profile(historic) == "historic_center"
+    informal = [{"height": 4, "roof_shape": None, "type": "yes"} for _ in range(20)]
+    assert cp.classify_profile(informal) == "informal_dense"
+    assert cp.classify_profile([]) == "mixed"
+    d = cp.profile_defaults("modern_towers")
+    assert d["roof_bias"] == "flat" and d["default_height"] > 15
+
+
+def test_roof_bias_applies_without_tag():
+    import cityroofs as cr
+    # perfil historico -> sesgo gabled en edificios bajos sin tag
+    kinds = {cr.choose_roof_kind(None, 8, seed=s * 1.7, bias="gabled") for s in range(40)}
+    assert "gabled" in kinds
+    # el tag OSM siempre gana sobre el sesgo
+    assert cr.choose_roof_kind("hipped", 8, bias="gabled") == "hipped"

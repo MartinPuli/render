@@ -1556,6 +1556,7 @@ def build_scene(scene):
     buildings = scene.get("buildings", [])
     roads = scene.get("roads", [])
     areas = scene.get("areas", [])
+    roof_bias = (scene.get("profile_defaults") or {}).get("roof_bias")  # sesgo del perfil
     C = make_collections()
 
     # --- Edificios: paredes agrupadas por color + techos (dos aguas / azotea) ---
@@ -1597,7 +1598,7 @@ def build_scene(scene):
             add_prism(bm, b["footprint"], base, top)
             fp0 = b["footprint"][0]
             kind = choose_roof_kind(b.get("roof_shape"), top - base,
-                                    fp0[0] * 1.3 + fp0[1] * 2.7)
+                                    fp0[0] * 1.3 + fp0[1] * 2.7, bias=roof_bias)
             build_roof(kind, b["footprint"], top, roof_house_bm, roof_flat_bm)
         _bevel(bm)
         bm_to_object(bm, f"Torre_vidrio_{idx}",
@@ -1613,7 +1614,7 @@ def build_scene(scene):
             add_prism(bm, b["footprint"], base, top)
             fp0 = b["footprint"][0]
             kind = choose_roof_kind(b.get("roof_shape"), top - base,
-                                    fp0[0] * 1.3 + fp0[1] * 2.7)
+                                    fp0[0] * 1.3 + fp0[1] * 2.7, bias=roof_bias)
             build_roof(kind, b["footprint"], top, roof_house_bm, roof_flat_bm)
         _bevel(bm)
         bm_to_object(bm, f"Edificio_{i}", make_windowed_material(f"bld_{i}", k),
