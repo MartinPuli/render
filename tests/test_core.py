@@ -62,3 +62,23 @@ def test_parse_height_levels():
 def test_parse_height_explicit():
     h, _ = p.parse_height({"height": "25 m"})
     assert abs(h - 25.0) < 1e-6
+
+
+# --- F1b: camara nunca dentro de un edificio ---
+def test_camera_moves_out_of_building():
+    import citycamera as cam
+    scene = {
+        "buildings": [{"footprint": [(-10, -10), (10, -10), (10, 10), (-10, 10)]}],
+        "roads": [{"path": [[0, -40], [0, -15]], "z": 0.06}],
+    }
+    (x, y), moved = cam.safe_street_point(scene, 0.0, 0.0)  # origen dentro del edificio
+    assert moved
+    assert not cam.inside_any_building(scene["buildings"], x, y)
+
+
+def test_camera_stays_if_already_safe():
+    import citycamera as cam
+    scene = {"buildings": [{"footprint": [(-10, -10), (10, -10), (10, 10), (-10, 10)]}],
+             "roads": []}
+    (x, y), moved = cam.safe_street_point(scene, 50.0, 50.0)  # afuera
+    assert not moved and (x, y) == (50.0, 50.0)
