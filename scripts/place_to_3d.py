@@ -390,6 +390,26 @@ def parse_height(tags):
     return h, min_h
 
 
+def height_source(tags):
+    """De donde salio la altura: 'explicit' (tag height), 'levels' (building:levels)
+    o 'default' (estimada por tipo). Sirve para saber cuanto confiar en la altura."""
+    if "height" in tags and re.search(r"\d", tags["height"]):
+        return "explicit"
+    if "building:levels" in tags and re.search(r"\d", tags["building:levels"]):
+        return "levels"
+    return "default"
+
+
+def building_confidence(tags):
+    """Confianza [0..1] en la reconstruccion del edificio segun la calidad del dato
+    OSM: altura explicita > por niveles > estimada; con nombre suma un poco."""
+    src = height_source(tags)
+    base = {"explicit": 0.9, "levels": 0.75, "default": 0.4}[src]
+    if tags.get("name"):
+        base = min(1.0, base + 0.05)
+    return round(base, 2)
+
+
 def building_color(tags):
     for key in ("building:colour", "building:color"):
         if key in tags:
@@ -459,7 +479,7 @@ def parse_osm(data, project):
     def to_xy(ring_lonlat):
         return [project(lat, lon) for (lon, lat) in ring_lonlat]
 
-    def add_building(tags, ring_lonlat):
+    def add_building(tags, ring_lonlat, osm_id=None, osm_type=None):
         pts = to_xy(ring_lonlat)
         if len(pts) < 4:  # necesita cerrar (>=3 unicos + repetido)
             return
@@ -473,6 +493,14 @@ def parse_osm(data, project):
             "min_height": round(min_h, 2),
             "color": [round(c, 3) for c in color],
             "type": tags.get("building", "yes"),
+            # --- F2a: procedencia + confianza por edificio ---
+            "osm_id": osm_id,
+            "osm_type": osm_type,
+            "name": tags.get("name"),
+            "roof_shape": tags.get("roof:shape"),
+            "height_source": height_source(tags),
+            "confidence": building_confidence(tags),
+            "source": "osm",
         })
 
     def add_road(tags, ring_lonlat):
@@ -508,12 +536,13 @@ def parse_osm(data, project):
         etype = el.get("type")
 
         if "building" in tags:
+            oid = el.get("id")
             if etype == "way" and el.get("geometry"):
-                add_building(tags, _ring_from_geometry(el["geometry"]))
+                add_building(tags, _ring_from_geometry(el["geometry"]), oid, etype)
             elif etype == "relation":
                 for mem in el.get("members", []):
                     if mem.get("role") == "outer" and mem.get("geometry"):
-                        add_building(tags, _ring_from_geometry(mem["geometry"]))
+                        add_building(tags, _ring_from_geometry(mem["geometry"]), oid, etype)
             continue
 
         if ("highway" in tags or "railway" in tags) and etype == "way" and el.get("geometry"):
