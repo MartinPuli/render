@@ -14,7 +14,10 @@ te devuelve:
 | `streetview/`, `photos/` | Imágenes reales de Google (si configurás API key) |
 
 ![Ejemplo: zona del Obelisco, Buenos Aires](docs/example-obelisco.png)
-*Ejemplo real generado por la skill: zona del Obelisco (Av. 9 de Julio), Buenos Aires.*
+*Zona del Obelisco (Av. 9 de Julio), Buenos Aires — `--radius 200`.*
+
+![Ejemplo: Puerto Madero, Buenos Aires](docs/example-puerto-madero.png)
+*Puerto Madero, Buenos Aires — `--radius 250`. Se ven los diques (agua en azul) y las torres altas con su altura real.*
 
 ## Cómo funciona
 

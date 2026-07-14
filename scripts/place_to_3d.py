@@ -45,6 +45,9 @@ BLENDER_BUILD = HERE / "blender_build.py"
 OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass.osm.jp/api/interpreter",
 ]
 USER_AGENT = "maps-to-3d-blender-skill/1.0 (OSM data; educational)"
 
@@ -413,14 +416,19 @@ def fetch_overpass(query):
         try:
             r = requests.post(
                 endpoint, data={"data": query},
-                headers={"User-Agent": USER_AGENT}, timeout=120,
+                headers={"User-Agent": USER_AGENT}, timeout=90,
             )
             if r.status_code == 200:
                 return r.json()
             last_err = f"HTTP {r.status_code} en {endpoint}"
+            print(f"   (Overpass {last_err}, probando otro servidor...)")
         except requests.RequestException as e:
-            last_err = f"{type(e).__name__} en {endpoint}: {e}"
-    raise SystemExit(f"No pude consultar Overpass/OSM: {last_err}")
+            last_err = f"{type(e).__name__} en {endpoint}"
+            print(f"   (Overpass falló en {endpoint}, probando otro...)")
+    raise SystemExit(
+        f"No pude consultar Overpass/OSM ({last_err}). Los servidores publicos de "
+        "OSM estan saturados; reintentá en un rato o pasá otro endpoint."
+    )
 
 
 def _ring_from_geometry(geom):
