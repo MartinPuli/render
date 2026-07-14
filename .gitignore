@@ -1,0 +1,15 @@
+# Salidas generadas
+output/
+*.blend
+*.blend1
+*.png
+!docs/**/*.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Sistema
+.DS_Store
