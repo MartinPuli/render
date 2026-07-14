@@ -489,7 +489,12 @@ def build_scene(scene):
             add_road_strip(bm, r["path"], float(r["width"]), z + jitter)
             if z > 1.0:  # es un puente elevado -> agregar pilares hasta el piso
                 add_bridge_piers(bm, r["path"], z)
-        mat = make_material(f"road_{i}", k, roughness=0.9, specular=0.08)
+        greyish = (max(k) - min(k) < 0.06 and sum(k) / 3 < 0.4)
+        asphalt = _tex("asphalt.jpg")
+        if greyish and asphalt:
+            mat = make_textured_material(f"road_{i}", asphalt, tile_m=6.0, roughness=0.85)
+        else:
+            mat = make_material(f"road_{i}", k, roughness=0.9, specular=0.08)
         bm_to_object(bm, f"Calles_{i}", mat)
 
     # --- Arboles (plazas + veredas de avenidas) ---
@@ -523,7 +528,12 @@ def build_scene(scene):
     v3 = bm.verts.new((maxx + margin, maxy + margin, 0.0))
     v4 = bm.verts.new((minx - margin, maxy + margin, 0.0))
     bm.faces.new((v1, v2, v3, v4))
-    bm_to_object(bm, "Piso", make_material("Piso", GROUND_COLOR, roughness=0.95, specular=0.05))
+    pav = _tex("pavement.jpg")
+    if pav:
+        piso_mat = make_textured_material("Piso", pav, tile_m=3.0, roughness=0.92)
+    else:
+        piso_mat = make_material("Piso", GROUND_COLOR, roughness=0.95, specular=0.05)
+    bm_to_object(bm, "Piso", piso_mat)
 
     return cx, cy, R
 
