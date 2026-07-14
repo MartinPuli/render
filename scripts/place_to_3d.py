@@ -293,6 +293,9 @@ BUILDING_COLORS = {
     "public":       (0.74, 0.72, 0.82),
     "garage":       (0.66, 0.64, 0.60),
     "roof":         (0.70, 0.48, 0.38),
+    "obelisk":      (0.86, 0.84, 0.80),  # piedra clara
+    "tower":        (0.72, 0.70, 0.68),
+    "monument":     (0.84, 0.82, 0.78),
     "_default":     (0.82, 0.72, 0.58),
 }
 
@@ -320,7 +323,12 @@ DEFAULT_HEIGHT = {
     "retail": 8.0, "office": 20.0, "industrial": 9.0, "warehouse": 9.0,
     "hotel": 22.0, "church": 15.0, "cathedral": 25.0, "hospital": 20.0,
     "school": 9.0, "university": 12.0, "_default": 9.0,
+    # landmarks verticales (se construyen como agujas, no cajas)
+    "obelisk": 67.0, "tower": 45.0, "monument": 28.0, "mast": 40.0, "chimney": 35.0,
 }
+
+# Tipos que se construyen como aguja/torre afinada en vez de caja con techo
+LANDMARK_TYPES = {"obelisk", "tower", "monument", "mast", "chimney"}
 
 LEVEL_HEIGHT = 3.2  # metros por piso
 
