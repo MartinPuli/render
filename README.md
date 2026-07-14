@@ -1,138 +1,80 @@
-# maps-to-3d 🗺️→🏙️
+# maps-to-3d 🌎→🟦 — de un lugar real a una escena 3D en Blender
 
-Skill de Claude Code que convierte **un lugar de Google Maps en un modelo 3D
-con colores en Blender**, y lo renderiza para que Claude pueda "verlo".
+Le pasás un lugar (link de Google Maps, `"lat,lng"` o un nombre) y te arma una
+escena 3D en Blender. Lo diferencial no es "OSM → Blender" (eso ya existe), sino el
+**loop con agente**: `lugar → escena → render → comparación con la realidad →
+corrección automática → repetir`, hasta que un evaluador la aprueba.
 
-> **Este repo trae dos skills:**
-> 1. **`maps-to-3d`** (este archivo / `SKILL.md`) — pipeline **headless**: baja
->    los datos, arma el 3D y renderiza un PNG. No necesita Blender abierto.
-> 2. **`blender-mcp-loop`** (`blender-mcp-loop/SKILL.md`) — usa el MCP
->    [blender-mcp](https://github.com/ahujasid/blender-mcp) para construir en tu
->    **Blender abierto** y **refinar en loop** (screenshot → comparar con Street
->    View → ajustar) hasta que se parezca a la realidad. Corre en local.
+Dos modos:
 
-Le pasás un link de Google Maps (o unas coordenadas, o el nombre de un lugar) y
-te devuelve:
+| Modo | Geometría | Uso | Salida |
+|---|---|---|---|
+| **EXACTO** | **Google Photorealistic 3D Tiles** (malla fotogramétrica real, texturizada) | render foto-real de cualquier ciudad del mundo | **imágenes** (render-only, ver ToS) |
+| **ESTILIZADO** | **OpenStreetMap** (extrusión de volúmenes) + materiales PBR/procedurales | maqueta liviana, editable, redistribuible | `.blend` + GLB + `report.json` |
 
-| Archivo | Que es |
-|---|---|
-| `render.png` | Render 3D de la zona con colores (vista 3/4 aérea) |
-| `model.blend` | El modelo 3D **editable en Blender** |
-| `scene.json` | La geometría intermedia (en metros) |
-| `streetview/`, `photos/` | Imágenes reales de Google (si configurás API key) |
+## ⚠️ Compliance — leer antes de usar en producción
+- **Modo EXACTO (Google 3D Tiles) = "render-only".** Las [políticas de Map Tiles](https://developers.google.com/maps/documentation/tile/policies)
+  **prohíben** precache/almacenamiento/uso offline y extracción de la malla. En prod:
+  emitir **solo imágenes** renderizadas, mantener los tiles en un **cache temporal**
+  (respetando `max-age`, borrado tras el render), **no** exportar la geometría de Google
+  a `.blend`/GLB persistente, y **componer la atribución** (agregado de `asset.copyright`
+  de los tiles visibles, ordenado por frecuencia, + logo de Google) en cada frame.
+  *El repo hoy guarda tiles para iterar rápido; para publicar hay que activar el modo
+  efímero + atribución (ver `SKILL.md` → roadmap).*
+- **Modo ESTILIZADO (OSM) = redistribuible** bajo **ODbL** (atribuir a OpenStreetMap).
+- Texturas/HDRI de **PolyHaven** = **CC0**. Street View = referencia interna (no redistribuir).
 
-![Ejemplo: zona del Obelisco, Buenos Aires](docs/example-obelisco.png)
-*Zona del Obelisco (Av. 9 de Julio), Buenos Aires — `--radius 200`.*
-
-![Ejemplo: Puerto Madero, Buenos Aires](docs/example-puerto-madero.png)
-*Puerto Madero, Buenos Aires — `--radius 250`. Se ven los diques (agua en azul) y las torres altas con su altura real.*
-
-![Ejemplo: cruce ferroviario de Federico Lacroze](docs/example-lacroze-puente.png)
-*Cruce del FC Mitre en Federico Lacroze — `--radius 180`. Las vías del tren (marrón) y la pasarela peatonal elevada sobre ellas con sus pilares.*
-
-## Cómo funciona
-
-```
-lugar de Google Maps
-   │
-   ├─▶ 1. Resuelve link/coords/nombre → lat,lng
-   │       (sigue links cortos maps.app.goo.gl, o geocodifica con Google)
-   │
-   ├─▶ 2. OpenStreetMap (Overpass API, gratis, sin key)
-   │       edificios + alturas, calles, vías de tren, agua, parques
-   │       (los puentes `bridge=yes` se elevan con pilares)
-   │
-   ├─▶ 3. (opcional) Google Street View + fotos del lugar  ← necesita API key
-   │
-   ├─▶ 4. Proyecta a metros y recorta al radio pedido → scene.json
-   │
-   └─▶ 5. Blender (bpy): extruye edificios con color, dibuja calles/agua/verde,
-           pone cámara + sol, y renderiza → render.png + model.blend
-```
-
-La geometría 3D sale de **OpenStreetMap** (no necesita API key). Las imágenes
-reales de Google (Street View / fotos) son opcionales y necesitan una key de
-Google Maps Platform.
-
-## Instalación
-
+## Quickstart
 ```bash
-# 1. Dependencia de Python
 python3 -m pip install requests
+export GOOGLE_MAPS_API_KEY="tu_key"            # Map Tiles API + Street View + Static + Elevation
+export MAPS3D_HDRI="$(pwd)/textures/sky.hdr"   # opcional (get_textures.py)
 
-# 2. Blender — cualquiera de las dos:
-#    (a) tener el binario 'blender' en el PATH, o
-#    (b) instalarlo como módulo de Python (requiere Python 3.11):
-python3 -m pip install bpy
+# --- EXACTO (Google 3D Tiles) ---
+python3 scripts/fetch_3dtiles.py <LAT> <LON> 380 output/<lugar>/tiles3d --detail 12 --max-tiles 260
+blender -b -P scripts/import_3dtiles.py -- output/<lugar>/tiles3d output/<lugar>/tiles3d
 
-# 3. (opcional) API key de Google para Street View / fotos / búsqueda por nombre
-export GOOGLE_MAPS_API_KEY="tu_key"
+# --- ESTILIZADO (OSM) ---
+python3 scripts/place_to_3d.py "<lugar>" --radius 350 --no-render --out output/<lugar>
+python3 scripts/get_textures.py textures       # PBR + HDRI (opcional)
+blender -b -P scripts/world_scene.py -- output/<lugar>/scene.json output/<lugar> <lugar> --export glb
 ```
+Requiere **Blender 5.x** (binario o módulo `bpy`). Probado con `/Applications/Blender.app`.
 
-Para usarla como skill de Claude Code, poné esta carpeta en tu directorio de
-skills, por ejemplo:
+## Loop de evaluación (el corazón)
+Render → bajar la **referencia real** de esa misma vista (Street View / satélite) →
+**panel adversarial** de agentes (materiales / geometría / luz / gestalt) que puntúa y
+prioriza defectos → arreglar el #1 → re-render → re-evaluar. Protocolo best-practice
+(2AFC, pose-match, panel multi-familia, métricas CMMD/CLIP-IQA, regla de corte) en
+[`EVALUATION.md`](EVALUATION.md).
 
-```bash
-ln -s "$(pwd)" ~/.claude/skills/maps-to-3d
-```
+## Fuentes de datos
+Google 3D Tiles (geometría exacta) · Elevation · Static-Maps satélite · Street View ·
+OpenStreetMap · PolyHaven. Qué es real vs inferido → `SKILL.md`.
 
-## Uso directo (sin Claude)
+## Scripts
+`place_to_3d.py` (lugar→OSM+StreetView→scene.json) · `fetch_3dtiles.py` (baja 3D Tiles) ·
+`import_3dtiles.py` (importa+ilumina+render) · `blender_build.py` (geometría+materiales OSM,
+14 colecciones) · `world_scene.py` (orquesta OSM headless) · `render_view.py` (vista para
+comparar) · `get_textures.py` (PBR+HDRI) · `live_build.py` (build en Blender vivo via blender-mcp).
 
-```bash
-# Por coordenadas (¡entre comillas por el signo menos!)
-python3 scripts/place_to_3d.py "-34.6037,-58.3816" --radius 200
+## Roadmap (research + review)
+- **Motor geométrico:** apoyarse en **OSM2World / BlenderGIS / blosm** para el modo OSM en
+  vez de mantener a mano gran parte de `blender_build.py`; separar **fuentes → CityScene
+  normalizada → render**.
+- **LOD por SSE** (screen-space-error) en 3D Tiles en vez del near-test OBB; **atribución +
+  modo efímero** para publicar.
+- **Techos reales** (`roof:shape`), **materiales por tag OSM** (`building:material/colour`),
+  **cascada de alturas** (levels×3m + jitter), **identidad por edificio** (ID OSM por
+  instancia via atributos/Geometry Nodes).
+- **Landmarks geofenced / por ID OSM** (no reglas globales: una pasarela ≠ Puente de la Mujer).
+- **Perfiles urbanos** (`informal_dense`, `historic_center`, `industrial`, `modern_towers`).
+- **Chequeos automáticos** de escena (cámara fuera de edificios, landmarks improbables,
+  siluetas/alturas, 4 vistas de control, snapshots de regresión).
+- **Imágenes abiertas** (KartaView/Mapillary) y **fotogrametría propia** (OpenDroneMap)
+  cuando no hay Google; **py3dtiles** para datasets propios.
 
-# Por link de Google Maps
-python3 scripts/place_to_3d.py "https://maps.app.goo.gl/xxxxx" --radius 300
-
-# Por nombre (necesita GOOGLE_MAPS_API_KEY)
-python3 scripts/place_to_3d.py "Times Square, New York" --radius 250
-
-# Si tenés el binario de Blender en vez del módulo bpy:
-python3 scripts/place_to_3d.py "-34.60,-58.38" --blender /usr/bin/blender
-```
-
-### Opciones
-
-| Opción | Default | Descripción |
-|---|---|---|
-| `--radius M` | 250 | Radio de la zona en metros. Detalle: 120-200. Barrio: 300-500. |
-| `--out DIR` | `output/<slug>` | Carpeta de salida |
-| `--no-streetview` | — | No bajar imágenes de Google |
-| `--no-render` | — | Solo bajar datos (genera `scene.json`, no abre Blender) |
-| `--blender PATH` | `$BLENDER_BIN` | Ruta al binario de Blender |
-
-## Ajustar el look
-
-- **Colores de edificios:** `BUILDING_COLORS` y `VARIED_NEUTRALS` en
-  `scripts/place_to_3d.py`.
-- **Luz / exposición / cámara:** las constantes al principio de
-  `scripts/blender_build.py` (`SUN_ENERGY`, `EXPOSURE`, `CAM_ELEV_DEG`,
-  `CAM_AZIM_DEG`, `CAM_DIST_FACTOR`, `CYCLES_SAMPLES`, `RES_X/RES_Y`).
-
-## Limitaciones
-
-- Las alturas de los edificios salen de los tags de OSM (`height` /
-  `building:levels`); si faltan, se estiman por tipo. Es una **maqueta creíble**,
-  no un levantamiento exacto.
-- Overpass (OSM) es gratis y a veces se satura → puede requerir reintentar.
-- No reconstruye fachadas con textura foto-realista; hace un modelo de volúmenes
-  con colores (estilo maqueta/mapa 3D). Las fotos de Street View se bajan aparte
-  como referencia.
-
-## Estructura
-
-```
-maps-to-3d/
-├── SKILL.md                 # skill 1 (maps-to-3d, headless)
-├── README.md
-├── requirements.txt
-├── scripts/
-│   ├── place_to_3d.py       # orquestador: link→coords, OSM, Street View, scene.json
-│   ├── blender_build.py     # Blender (bpy): construye el 3D con colores y renderiza
-│   └── live_build.py        # helper para construir dentro de un Blender vivo (blender-mcp)
-├── blender-mcp-loop/
-│   └── SKILL.md             # skill 2 (loop en vivo con blender-mcp)
-└── docs/
-    └── *.png                # renders de ejemplo
-```
+## Licencia / atribución
+Geometría OSM © colaboradores de OpenStreetMap (**ODbL**). Google 3D Tiles/satélite:
+sujeto a los términos de Google Maps Platform (atribución obligatoria, render-only).
+Texturas/HDRI PolyHaven: **CC0**.
