@@ -108,6 +108,57 @@ def main():
           % (min(zs), max(zs), len(near_z), near_z[len(near_z) // 8] if near_z else 0,
              near_z[len(near_z) // 2] if near_z else 0, center_ground, R))
 
+    # Re-shadear el AGUA usando el POLIGONO de agua de OSM (mismo frame local ENU:
+    # X=este, Y=norte, centrado en el mismo lat/lon). Es confiable porque marca
+    # exactamente el dique/rio y no inunda plazas bajas. Google trae el agua plana
+    # y mate; aca le ponemos un material reflectante con micro-oleaje.
+    import json as _json
+    waters = []
+    osm_path = os.path.join(o["tiles"], "..", "scene.json")
+    if os.path.isfile(osm_path):
+        try:
+            _sc = _json.load(open(osm_path))
+            waters = [a["polygon"] for a in _sc.get("areas", [])
+                      if a["color"][2] > a["color"][1]]
+        except Exception:
+            waters = []
+    if waters:
+        meshes_w = [x for x in coll.objects if x.type == "MESH"]
+        # bbox de las aguas OSM (+ margen) para rellenar todo el nivel del dique
+        wxs = [p[0] for w in waters for p in w]
+        wys = [p[1] for w in waters for p in w]
+        wb = (min(wxs) - 12, min(wys) - 12, max(wxs) + 12, max(wys) + 12)
+        # Pass 1: caras horizontales dentro del poligono OSM -> nivel de agua
+        zmark = []
+        for ob in meshes_w:
+            rot = ob.matrix_world.to_3x3()
+            for poly in ob.data.polygons:
+                if (rot @ poly.normal).z > 0.85:
+                    c = ob.matrix_world @ poly.center
+                    if any(bb._point_in_poly(w, c.x, c.y) for w in waters):
+                        zmark.append(c.z)
+        zmark.sort()
+        water_z = zmark[len(zmark) // 2] if zmark else None
+        # Pass 2: material de agua a caras horizontales en el poligono OSM, o al
+        # nivel del agua dentro del bbox del dique (rellena el seam del gap OSM).
+        water_mat = bb.make_water_material("agua_dique")
+        n_water = 0
+        for ob in meshes_w:
+            rot = ob.matrix_world.to_3x3()
+            widx = len(ob.data.materials)
+            ob.data.materials.append(water_mat)
+            for poly in ob.data.polygons:
+                if (rot @ poly.normal).z <= 0.85:
+                    continue
+                c = ob.matrix_world @ poly.center
+                in_poly = any(bb._point_in_poly(w, c.x, c.y) for w in waters)
+                in_fill = (water_z is not None and abs(c.z - water_z) < 1.6
+                           and wb[0] < c.x < wb[2] and wb[1] < c.y < wb[3])
+                if in_poly or in_fill:
+                    poly.material_index = widx
+                    n_water += 1
+        print(f"[3dtiles] agua reflectante (OSM+fill z={water_z}): {n_water} caras")
+
     # Plano base grande al nivel del suelo local: tapa la cara inferior del slab
     # flotante y da un "horizonte" en vez de que el mundo termine en un corte duro.
     base_z = center_ground - 3.0
