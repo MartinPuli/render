@@ -176,6 +176,72 @@ def add_spire(bm, footprint, base_z, top_z):
         pass
 
 
+def _icosphere(bm, radius):
+    try:
+        return bmesh.ops.create_icosphere(bm, subdivisions=1, radius=radius)
+    except TypeError:
+        return bmesh.ops.create_icosphere(bm, subdivisions=1, diameter=radius * 2)
+
+
+def add_tree(trunk_bm, fol_bm, x, y, height=6.0):
+    """Arbol simple: tronco (caja fina) + copa (icoesfera)."""
+    tw = max(0.25, height * 0.05)
+    box = [(x - tw, y - tw), (x + tw, y - tw), (x + tw, y + tw), (x - tw, y + tw)]
+    add_prism(trunk_bm, box, 0.0, height * 0.5)
+    res = _icosphere(fol_bm, radius=height * 0.34)
+    verts = [v for v in res["verts"]]
+    bmesh.ops.translate(fol_bm, verts=verts, vec=(x, y, height * 0.72))
+
+
+def scatter_trees(areas, roads, cap=280):
+    """Devuelve (trunk_bm, fol_bm) con arboles en plazas y sobre avenidas anchas."""
+    trunk_bm = bmesh.new()
+    fol_bm = bmesh.new()
+    count = 0
+
+    # arboles en areas verdes
+    for a in areas:
+        if a.get("type") in ("water",) or a["color"][2] > a["color"][1]:
+            continue  # no en el agua
+        pts = dedupe_ring(a["polygon"], closed=True)
+        if len(pts) < 3:
+            continue
+        cx, cy, sx, sy = _centroid_bbox(pts)
+        n = min(10, max(1, int(sx * sy / 500)))
+        for i in range(n):
+            if count >= cap:
+                break
+            jx = (((i * 37) % 100) / 100.0 - 0.5) * sx * 0.6
+            jy = (((i * 61) % 100) / 100.0 - 0.5) * sy * 0.6
+            add_tree(trunk_bm, fol_bm, cx + jx, cy + jy, 5.5 + (i % 3))
+            count += 1
+
+    # arboles de vereda sobre avenidas (calles anchas)
+    for r in roads:
+        if count >= cap:
+            break
+        if float(r.get("width", 0)) < 7.0 or r.get("z", 0) > 1:
+            continue
+        pts = dedupe_ring(r["path"], closed=False)
+        for i in range(len(pts) - 1):
+            x1, y1 = pts[i]
+            x2, y2 = pts[i + 1]
+            dx, dy = x2 - x1, y2 - y1
+            L = math.hypot(dx, dy)
+            if L < 8:
+                continue
+            nx, ny = -dy / L, dx / L
+            off = float(r["width"]) / 2 + 2.5
+            for side in (1, -1):
+                if count >= cap:
+                    break
+                mx = (x1 + x2) / 2 + nx * off * side
+                my = (y1 + y2) / 2 + ny * off * side
+                add_tree(trunk_bm, fol_bm, mx, my, 6.0)
+                count += 1
+    return trunk_bm, fol_bm, count
+
+
 def add_bridge_piers(bm, path, deck_z, spacing=18.0, size=1.4):
     """Agrega pilares (columnas) desde el piso hasta el tablero de un puente elevado."""
     pts = dedupe_ring(path, closed=False)
@@ -384,6 +450,19 @@ def build_scene(scene):
                 add_bridge_piers(bm, r["path"], z)
         mat = make_material(f"road_{i}", k, roughness=0.9, specular=0.08)
         bm_to_object(bm, f"Calles_{i}", mat)
+
+    # --- Arboles (plazas + veredas de avenidas) ---
+    trunk_bm, fol_bm, ntrees = scatter_trees(areas, roads)
+    if len(trunk_bm.faces) > 0:
+        bm_to_object(trunk_bm, "Troncos",
+                     make_material("tronco", (0.34, 0.23, 0.15), roughness=0.95))
+    else:
+        trunk_bm.free()
+    if len(fol_bm.faces) > 0:
+        bm_to_object(fol_bm, "Copas",
+                     make_material("copa", (0.28, 0.44, 0.22), roughness=0.95))
+    else:
+        fol_bm.free()
 
     # --- Bounds / centro ---
     bnd = scene.get("bounds", {})
