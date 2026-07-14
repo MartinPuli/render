@@ -20,14 +20,18 @@ import bmesh
 # --- Parametros de render / camara ---
 RES_X, RES_Y = 1280, 960
 CYCLES_SAMPLES = 48
-SUN_ENERGY = 2.0
-WORLD_STRENGTH = 0.30
-EXPOSURE = -0.6         # compensacion de exposicion (evita quemar los blancos)
+SUN_ENERGY = 2.4
+WORLD_STRENGTH = 0.18   # ambiente bajo => colores mas saturados (no lavados)
+EXPOSURE = -0.5         # compensacion de exposicion (evita quemar los blancos)
 CAM_ELEV_DEG = 38.0     # elevacion de la camara (vista 3/4 aerea)
 CAM_AZIM_DEG = 45.0     # azimut
 CAM_DIST_FACTOR = 2.15  # distancia = radio_escena * factor
 CAM_FRAME_FACTOR = 1.05  # cuanto margen dejar alrededor de la escena
-GROUND_COLOR = (0.58, 0.59, 0.55)
+GROUND_COLOR = (0.55, 0.63, 0.44)   # verde/tierra (no gris)
+ROOF_HOUSE_COLOR = (0.62, 0.30, 0.24)  # teja terracota
+ROOF_FLAT_COLOR = (0.44, 0.45, 0.48)   # azotea gris
+ROOF_SMALL_MAX_H = 11.0  # edificios mas bajos que esto -> techo a dos aguas
+BEVEL = 0.18             # bisel de aristas de edificios (m)
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +89,55 @@ def add_flat_polygon(bm, poly, z):
         bm.faces.new(verts)
     except ValueError:
         pass
+
+
+def _centroid_bbox(pts):
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    sx = max(p[0] for p in pts) - min(p[0] for p in pts)
+    sy = max(p[1] for p in pts) - min(p[1] for p in pts)
+    return cx, cy, sx, sy
+
+
+def add_hip_roof(bm, footprint, top_z):
+    """Techo a cuatro aguas (frustum): anillo original + anillo achicado y elevado."""
+    pts = dedupe_ring(footprint, closed=True)
+    if len(pts) < 3:
+        return
+    cx, cy, sx, sy = _centroid_bbox(pts)
+    roof_h = max(1.5, min(4.5, 0.35 * min(sx, sy)))
+    shrink = 0.62
+    try:
+        base = [bm.verts.new((x, y, top_z)) for (x, y) in pts]
+        top = [bm.verts.new((cx + (x - cx) * (1 - shrink),
+                             cy + (y - cy) * (1 - shrink),
+                             top_z + roof_h)) for (x, y) in pts]
+    except ValueError:
+        return
+    n = len(pts)
+    for i in range(n):
+        j = (i + 1) % n
+        try:
+            bm.faces.new((base[i], base[j], top[j], top[i]))
+        except ValueError:
+            pass
+    try:
+        bm.faces.new(top)   # tapa superior
+    except ValueError:
+        pass
+
+
+def add_rooftop_detail(bm, footprint, top_z):
+    """Cajita en la azotea (tanque/ascensor) para dar detalle a las torres."""
+    pts = dedupe_ring(footprint, closed=True)
+    if len(pts) < 3:
+        return
+    cx, cy, sx, sy = _centroid_bbox(pts)
+    w = max(1.6, min(6.0, 0.32 * min(sx, sy)))
+    h = 2.6
+    box = [(cx - w / 2, cy - w / 2), (cx + w / 2, cy - w / 2),
+           (cx + w / 2, cy + w / 2), (cx - w / 2, cy + w / 2)]
+    add_prism(bm, box, top_z, top_z + h)
 
 
 def add_bridge_piers(bm, path, deck_z, spacing=18.0, size=1.4):
@@ -183,17 +236,43 @@ def build_scene(scene):
     roads = scene.get("roads", [])
     areas = scene.get("areas", [])
 
-    # --- Edificios: agrupados por color para minimizar objetos/materiales ---
+    # --- Edificios: paredes agrupadas por color + techos (dos aguas / azotea) ---
     groups = {}
     for b in buildings:
         k = color_key(b["color"])
         groups.setdefault(k, []).append(b)
+    roof_house_bm = bmesh.new()  # techos de teja (casas bajas)
+    roof_flat_bm = bmesh.new()   # detalle de azotea (torres)
     for i, (k, items) in enumerate(groups.items()):
         bm = bmesh.new()
         for b in items:
-            add_prism(bm, b["footprint"], float(b.get("min_height", 0.0)), float(b["height"]))
-        mat = make_material(f"bld_{i}", k, roughness=0.82, specular=0.12)
+            base = float(b.get("min_height", 0.0))
+            top = float(b["height"])
+            add_prism(bm, b["footprint"], base, top)
+            if (top - base) <= ROOF_SMALL_MAX_H:
+                add_hip_roof(roof_house_bm, b["footprint"], top)
+            else:
+                add_rooftop_detail(roof_flat_bm, b["footprint"], top)
+        # bisel de aristas -> menos "caja plana"
+        if BEVEL > 0:
+            try:
+                bmesh.ops.bevel(bm, geom=list(bm.edges) + list(bm.verts),
+                                offset=BEVEL, segments=1, affect="EDGES",
+                                clamp_overlap=True)
+            except Exception:
+                pass
+        mat = make_material(f"bld_{i}", k, roughness=0.8, specular=0.14)
         bm_to_object(bm, f"Edificios_{i}", mat)
+    if len(roof_house_bm.faces) > 0:
+        bm_to_object(roof_house_bm, "Techos_teja",
+                     make_material("techo_teja", ROOF_HOUSE_COLOR, roughness=0.7, specular=0.15))
+    else:
+        roof_house_bm.free()
+    if len(roof_flat_bm.faces) > 0:
+        bm_to_object(roof_flat_bm, "Azoteas",
+                     make_material("azotea", ROOF_FLAT_COLOR, roughness=0.85, specular=0.1))
+    else:
+        roof_flat_bm.free()
 
     # --- Areas de agua y verde ---
     area_groups = {}
@@ -306,6 +385,30 @@ def setup_camera(cx, cy, R):
     con.target = target
     con.track_axis = "TRACK_NEGATIVE_Z"
     con.up_axis = "UP_Y"
+
+
+def setup_streetview_camera(heading_deg=0.0, fov_deg=90.0, height=2.5, cx=0.0, cy=0.0):
+    """Camara a nivel de calle en (cx,cy) mirando hacia 'heading' (0=norte, 90=este).
+
+    Sirve para comparar el render contra una imagen de Google Street View tomada
+    en el mismo punto y con el mismo rumbo/FOV.
+    """
+    scn = bpy.context.scene
+    cam_data = bpy.data.cameras.new("CamCalle")
+    cam = bpy.data.objects.new("CamCalle", cam_data)
+    scn.collection.objects.link(cam)
+    scn.camera = cam
+    cam.location = (cx, cy, height)
+    # heading: 0=norte(+Y), 90=este(+X). En Blender la camara mira hacia -Z;
+    # con rot X=90 mira al horizonte (+Y = norte). rot Z gira el rumbo (horario).
+    cam.rotation_euler = (math.radians(90.0), 0.0, math.radians(-heading_deg))
+    cam_data.clip_end = 5000.0
+    try:
+        cam_data.sensor_fit = "HORIZONTAL"
+    except Exception:
+        pass
+    cam_data.angle = math.radians(fov_deg)
+    return cam
 
 
 def setup_render(render_path):

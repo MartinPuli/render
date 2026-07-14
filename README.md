@@ -3,6 +3,14 @@
 Skill de Claude Code que convierte **un lugar de Google Maps en un modelo 3D
 con colores en Blender**, y lo renderiza para que Claude pueda "verlo".
 
+> **Este repo trae dos skills:**
+> 1. **`maps-to-3d`** (este archivo / `SKILL.md`) — pipeline **headless**: baja
+>    los datos, arma el 3D y renderiza un PNG. No necesita Blender abierto.
+> 2. **`blender-mcp-loop`** (`blender-mcp-loop/SKILL.md`) — usa el MCP
+>    [blender-mcp](https://github.com/ahujasid/blender-mcp) para construir en tu
+>    **Blender abierto** y **refinar en loop** (screenshot → comparar con Street
+>    View → ajustar) hasta que se parezca a la realidad. Corre en local.
+
 Le pasás un link de Google Maps (o unas coordenadas, o el nombre de un lugar) y
 te devuelve:
 
@@ -116,12 +124,15 @@ python3 scripts/place_to_3d.py "-34.60,-58.38" --blender /usr/bin/blender
 
 ```
 maps-to-3d/
-├── SKILL.md                 # definición de la skill (para Claude)
+├── SKILL.md                 # skill 1 (maps-to-3d, headless)
 ├── README.md
 ├── requirements.txt
 ├── scripts/
 │   ├── place_to_3d.py       # orquestador: link→coords, OSM, Street View, scene.json
-│   └── blender_build.py     # Blender (bpy): construye el 3D con colores y renderiza
+│   ├── blender_build.py     # Blender (bpy): construye el 3D con colores y renderiza
+│   └── live_build.py        # helper para construir dentro de un Blender vivo (blender-mcp)
+├── blender-mcp-loop/
+│   └── SKILL.md             # skill 2 (loop en vivo con blender-mcp)
 └── docs/
-    └── example-obelisco.png # render de ejemplo
+    └── *.png                # renders de ejemplo
 ```
