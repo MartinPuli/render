@@ -350,14 +350,30 @@ def make_windowed_material(name, wall_rgb):
         brick.inputs["Color1"].default_value = (0.10, 0.13, 0.18, 1.0)
         brick.inputs["Color2"].default_value = (0.14, 0.18, 0.25, 1.0)
         brick.inputs["Mortar"].default_value = (wall_rgb[0], wall_rgb[1], wall_rgb[2], 1.0)
-        params = {"Scale": 1.0, "Mortar Size": 0.28, "Mortar Smooth": 0.1,
-                  "Bias": 0.0, "Brick Width": 3.4, "Row Height": 3.0}
+        params = {"Scale": 1.0, "Mortar Size": 0.22, "Mortar Smooth": 0.1,
+                  "Bias": 0.0, "Brick Width": 2.6, "Row Height": 2.6}
         for nm, val in params.items():
             if nm in brick.inputs:
                 brick.inputs[nm].default_value = val
         nt.links.new(brick.outputs["Color"], bsdf.inputs["Base Color"])
-        if "Roughness" in bsdf.inputs:
-            bsdf.inputs["Roughness"].default_value = 0.6
+        # Ventanas = vidrio reflectivo; pared = mate. El mask del ladrillo (Fac)
+        # maneja rugosidad y metalico -> las ventanas reflejan el cielo.
+        try:
+            fac = brick.outputs["Fac"]
+            mr = nt.nodes.new("ShaderNodeMapRange")
+            mr.inputs["To Min"].default_value = 0.14   # ventana: vidrio
+            mr.inputs["To Max"].default_value = 0.75   # pared: mate
+            nt.links.new(fac, mr.inputs["Value"])
+            nt.links.new(mr.outputs["Result"], bsdf.inputs["Roughness"])
+            mm = nt.nodes.new("ShaderNodeMapRange")
+            mm.inputs["To Min"].default_value = 0.55   # ventana algo metalica
+            mm.inputs["To Max"].default_value = 0.0    # pared no
+            nt.links.new(fac, mm.inputs["Value"])
+            if "Metallic" in bsdf.inputs:
+                nt.links.new(mm.outputs["Result"], bsdf.inputs["Metallic"])
+        except Exception:
+            if "Roughness" in bsdf.inputs:
+                bsdf.inputs["Roughness"].default_value = 0.6
     except Exception:
         bsdf.inputs["Base Color"].default_value = (wall_rgb[0], wall_rgb[1], wall_rgb[2], 1.0)
     return mat
