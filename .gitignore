@@ -13,3 +13,10 @@ venv/
 
 # Sistema
 .DS_Store
+
+# Assets/texturas descargadas (regenerables: get_textures.py / fetch_3dtiles.py / Hyper3D)
+textures/
+assets/
+*.glb
+*.hdr
+*.exr

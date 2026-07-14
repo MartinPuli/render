@@ -36,6 +36,21 @@ del usuario y **refinarla en un ciclo cerrado** comparando contra Street View.
 5. Anotá la **ruta absoluta del repo** (`REPO`); la vas a usar en el código que
    mandás a Blender.
 
+> ⚠ **CRÍTICO — no mates la conexión MCP.** NUNCA corras
+> `bpy.ops.wm.read_factory_settings()` en el Blender vivo: resetea Blender y
+> desregistra el addon blender-mcp, cortando la conexión (después `get_scene_info`
+> falla). Para limpiar la escena usá `blender_build.clear_scene()` (borra objetos
+> y datos, deja el addon intacto). `live_build.build(clear=True)` ya lo hace así.
+>
+> 💡 **Foto-realismo (recomendado).** Antes de construir, bajá texturas PBR + HDRI
+> (`python3 REPO/scripts/get_textures.py REPO/textures`) y, en el código que mandás
+> a Blender, seteá `os.environ["MAPS3D_TEXTURES"]` y `os.environ["MAPS3D_HDRI"]` y
+> `blender_build.TEXTURE_DIR`/`HDRI_PATH` **antes** de `build_scene`. Da asfalto/
+> hormigón/corteza reales + cielo con nubes (reflejos en vidrio y agua).
+>
+> 🖼 **Alternativa headless:** `scripts/world_scene.py` arma la escena completa
+> (colecciones + cámaras + luz + export + reporte) sin depender del MCP vivo.
+
 ## El loop (pasos para Claude)
 
 ### Paso 0 — Verificar el MCP

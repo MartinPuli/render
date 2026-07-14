@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""
+import_3dtiles.py — importa a Blender la malla 3D REAL de Google (bajada por
+fetch_3dtiles.py), transformada de ECEF a metros locales (ENU centrado en el
+origen), con sus texturas fotogrametricas. Arma luz + camaras + tonemapping y
+renderiza. Es la geometria EXACTA (edificios/puentes/terreno reales).
+
+Uso:
+  blender -b -P import_3dtiles.py -- TILES_DIR OUT_DIR [--samples 48] [--res 1280 800]
+
+TILES_DIR debe tener manifest.json + tiles/*.glb (salida de fetch_3dtiles.py).
+"""
+import json
+import math
+import os
+import sys
+from pathlib import Path
+
+import bpy
+import mathutils
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.append(str(HERE))
+import blender_build as bb  # noqa: E402
+
+
+def enu_matrix(manifest):
+    e, n, u = manifest["enu"]
+    ox, oy, oz = manifest["ecef_origin"]
+
+    def dot(a, b):
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    o = (ox, oy, oz)
+    return mathutils.Matrix((
+        (e[0], e[1], e[2], -dot(e, o)),
+        (n[0], n[1], n[2], -dot(n, o)),
+        (u[0], u[1], u[2], -dot(u, o)),
+        (0.0, 0.0, 0.0, 1.0),
+    ))
+
+
+def parse_argv():
+    argv = sys.argv
+    argv = argv[argv.index("--") + 1:] if "--" in argv else argv[1:]
+    if len(argv) < 2:
+        sys.exit("Uso: import_3dtiles.py TILES_DIR OUT_DIR [--samples N] [--res W H]")
+    o = {"tiles": argv[0], "out": argv[1], "samples": 48, "res": (1280, 800)}
+    i = 2
+    while i < len(argv):
+        if argv[i] == "--samples":
+            o["samples"] = int(argv[i + 1]); i += 1
+        elif argv[i] == "--res":
+            o["res"] = (int(argv[i + 1]), int(argv[i + 2])); i += 2
+        i += 1
+    return o
+
+
+def main():
+    o = parse_argv()
+    manifest = json.load(open(os.path.join(o["tiles"], "manifest.json")))
+    M = enu_matrix(manifest)
+
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    coll = bpy.data.collections.new("02_GOOGLE_3DTILES")
+    bpy.context.scene.collection.children.link(coll)
+
+    tiles_dir = o["tiles"]
+    n_obj = 0
+    for t in manifest["tiles"]:
+        path = os.path.join(tiles_dir, t["file"])
+        if not os.path.isfile(path):
+            continue
+        before = set(bpy.data.objects)
+        try:
+            bpy.ops.import_scene.gltf(filepath=path)
+        except Exception as e:
+            print(f"  (import {t['file']} fallo: {e})")
+            continue
+        for ob in [x for x in bpy.data.objects if x not in before]:
+            if ob.type == "MESH":
+                ob.matrix_world = M @ ob.matrix_world
+                n_obj += 1
+            for c in list(ob.users_collection):
+                c.objects.unlink(ob)
+            coll.objects.link(ob)
+
+    print(f"[3dtiles] importados {n_obj} meshes")
+
+    xs, ys, zs = [], [], []
+    for ob in coll.objects:
+        if ob.type != "MESH":
+            continue
+        for corner in ob.bound_box:
+            p = ob.matrix_world @ mathutils.Vector(corner)
+            xs.append(p.x); ys.append(p.y); zs.append(p.z)
+    if not xs:
+        sys.exit("No se importo geometria.")
+    cx = (min(xs) + max(xs)) / 2
+    cy = (min(ys) + max(ys)) / 2
+    R = max(max(xs) - min(xs), max(ys) - min(ys)) / 2
+    # suelo local cerca del centro (evita outliers profundos de tiles lejanos)
+    near_z = [z for (x, y, z) in zip(xs, ys, zs)
+              if (x - cx) ** 2 + (y - cy) ** 2 < (R * 0.3) ** 2]
+    near_z = sorted(near_z or zs)
+    center_ground = near_z[len(near_z) // 8] if near_z else 0.0
+    print("[3dtiles] ZSTATS all[min=%.0f max=%.0f] center[n=%d p12=%.0f p50=%.0f] cg=%.0f R=%.0f"
+          % (min(zs), max(zs), len(near_z), near_z[len(near_z) // 8] if near_z else 0,
+             near_z[len(near_z) // 2] if near_z else 0, center_ground, R))
+
+    # Plano base grande al nivel del suelo local: tapa la cara inferior del slab
+    # flotante y da un "horizonte" en vez de que el mundo termine en un corte duro.
+    base_z = center_ground - 3.0
+    bmesh_base = bpy.data.meshes.new("Base_horizonte")
+    s = R * 12
+    bmesh_base.from_pydata(
+        [(cx - s, cy - s, base_z), (cx + s, cy - s, base_z),
+         (cx + s, cy + s, base_z), (cx - s, cy + s, base_z)], [], [(0, 1, 2, 3)])
+    bmesh_base.update()
+    base_ob = bpy.data.objects.new("Base_horizonte", bmesh_base)
+    base_ob.data.materials.append(bb.make_material("base_horizonte", (0.20, 0.23, 0.22),
+                                                    roughness=0.92, specular=0.05))
+    coll.objects.link(base_ob)
+
+    bb.setup_world(sky=True)
+    if not bb.using_hdri():
+        sun = bpy.data.lights.new("Sol", "SUN"); sun.energy = 2.2
+        so = bpy.data.objects.new("Sol", sun)
+        so.rotation_euler = (math.radians(52), math.radians(8), math.radians(150))
+        bpy.context.scene.collection.objects.link(so)
+
+    scn = bpy.context.scene
+    scn.render.engine = "CYCLES"
+    scn.cycles.samples = o["samples"]
+    scn.cycles.device = "CPU"
+    try:
+        scn.cycles.use_denoising = True
+    except Exception:
+        pass
+    scn.render.resolution_x, scn.render.resolution_y = o["res"]
+    bb.apply_street_view_settings()
+    # Bruma de distancia fuerte: disuelve los bordes cortados de los tiles en el
+    # cielo y da perspectiva aerea (aerial perspective) — el defecto #1 del evaluador.
+    bb.setup_compositor(scn, haze_color=(0.66, 0.73, 0.82),
+                        haze_start=R * 0.6, haze_end=R * 2.2,
+                        haze_strength=0.85, vignette=0.18)
+
+    out_dir = Path(o["out"]); out_dir.mkdir(parents=True, exist_ok=True)
+
+    def render_cam(name, elev, azim, dist_f, tag, tz=None, frame=1.05, tgt_z=None):
+        cd = bpy.data.cameras.new(name)
+        cam = bpy.data.objects.new(name, cd)
+        scn.collection.objects.link(cam)
+        d = R * dist_f
+        elev, azim = math.radians(elev), math.radians(azim)
+        if tz is None:
+            tz = min(R * 0.15, 40)
+        cam.location = (cx + d * math.cos(elev) * math.sin(azim),
+                        cy - d * math.cos(elev) * math.cos(azim),
+                        tz + d * math.sin(elev))
+        cd.clip_end = d * 10
+        cd.angle = 2.0 * math.atan((R * frame) / d)
+        tgt = bpy.data.objects.new(name + "_t", None)
+        tgt.location = (cx, cy, tgt_z if tgt_z is not None else tz)
+        scn.collection.objects.link(tgt)
+        con = cam.constraints.new("TRACK_TO")
+        con.target = tgt; con.track_axis = "TRACK_NEGATIVE_Z"; con.up_axis = "UP_Y"
+        scn.camera = cam
+        p = str(out_dir / f"tiles3d_{tag}.png")
+        scn.render.filepath = p
+        bpy.ops.render.render(write_still=True)
+        print(f"[3dtiles] render {tag} -> {p}")
+
+    render_cam("Cam_aerea", 34, 135, 2.0, "aerial", frame=0.95)
+    render_cam("Cam_oblicua", 14, 205, 1.7, "oblique", frame=0.9)
+    # vista baja (eye-level): mismo esquema que funciona, angulo bajo y cercano,
+    # apuntada al nivel del suelo local (mediana Z cerca del centro)
+    render_cam("Cam_baja", 7, 150, 0.62, "street", frame=1.15, tgt_z=center_ground)
+
+    blend = str(out_dir / "google_3dtiles.blend")
+    try:
+        bpy.ops.wm.save_as_mainfile(filepath=blend)
+        print(f"[3dtiles] .blend -> {blend}")
+    except Exception as e:
+        print(f"[3dtiles] no guardo .blend: {e}")
+
+
+if __name__ == "__main__":
+    main()

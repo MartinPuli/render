@@ -34,7 +34,9 @@ def build(scene_path, heading=None, sv_xy=(0.0, 0.0), height=2.5, fov=90.0,
         scene = json.load(f)
 
     if clear:
-        bpy.ops.wm.read_factory_settings(use_empty=True)
+        # NO usar read_factory_settings: bajo blender-mcp resetea Blender y
+        # desregistra el addon, matando el servidor MCP. Limpieza segura:
+        bb.clear_scene()
 
     cx, cy, R = bb.build_scene(scene)
     street_level = heading is not None
