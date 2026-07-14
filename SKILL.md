@@ -89,6 +89,36 @@ Arma la escena completa en colecciones `00_REFERENCE..13_EXPORT`, con camaras
 - `get_textures.py` — baja texturas PBR CC0 + HDRI de PolyHaven.
 - `live_build.py` — construye el modo OSM en un Blender vivo via blender-mcp (clear seguro).
 
+## Loop de evaluacion adversarial (¿pasa por real?) — el corazon de la skill
+No alcanza con renderizar una vez: hay que **iterar comparando contra la realidad**.
+El ciclo (lo ejecuta Claude usando la skill):
+
+1. **Render** de una vista (`render_view.py` para calle/aerea del modo OSM, o
+   `import_3dtiles.py` para el modo exacto).
+2. **Conseguir la referencia REAL de esa misma vista** para comparar apples-to-apples:
+   - Calle: `streetview/heading_XXX.jpg` que baja `place_to_3d.py` (mismo punto y rumbo).
+   - Aerea: imagen satelital de Google Static Maps del area (misma zona).
+3. **Evaluar con un panel adversarial** (subagentes, uno por lente: materiales,
+   geometria, luz/atmosfera, y un "gestalt" que decide si pasa por foto). Cada uno
+   lee `render` + `referencia`, devuelve un **score 0–100** y una lista de
+   **giveaways** (que delata que es CG) con **severidad + fix concreto**. Un
+   sintetizador los **deduplica y prioriza**.
+4. **Arreglar el defecto #1** (materiales/geometria/luz en `blender_build.py` o el
+   encuadre/compositor en `import_3dtiles.py`).
+5. **Re-render → re-evaluar** y confirmar que el score subio (no asumir; medirlo).
+6. **Repetir** hasta que el score se estanca o el usuario dice listo. "Indistinguible"
+   es asintotico: el panel siempre encuentra algo (el modo 3D Tiles es lo mas cerca
+   porque es fotogrametria real de Google).
+
+Defectos que el panel marca casi siempre y sus fixes (ya aplicados en la skill):
+vidrio que no refleja → HDRI + roughness baja + variacion por panel; arboles de
+plastico → multi-lobulo + leaf-cards con alpha + translucidez; sin autos → autos
+proc.; sin bruma → `setup_compositor` (haze por profundidad, con el **cielo excluido**);
+slab flotante del 3D Tiles → plano base + horizonte + haze; agua plana → re-shader
+reflectante por mascara de poligono OSM.
+
+Este loop es lo que convierte "un modelo 3D" en "un render que intenta pasar por foto".
+
 ## Assets 3D reales (Hyper3D Rodin / Sketchfab, via blender-mcp)
 Para enriquecer el modo OSM con arboles/autos/landmarks REALES (en vez de los
 proxies procedurales), con blender-mcp conectado y **Hyper3D Rodin** habilitado
