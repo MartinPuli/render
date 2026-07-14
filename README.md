@@ -41,6 +41,16 @@ blender -b -P scripts/world_scene.py -- output/<lugar>/scene.json output/<lugar>
 ```
 Requiere **Blender 5.x** (binario o módulo `bpy`). Probado con `/Applications/Blender.app`.
 
+## Instalación como paquete (opcional)
+```bash
+python3 -m pip install -e .           # expone el CLI `place2blender`
+place2blender "<lugar>" --radius 350 --no-render
+python3 -m pytest tests/ -q           # 36 tests puros (sin Blender ni Overpass)
+```
+Config por entorno: `MAPS3D_RADIUS / SAMPLES / ENGINE / TEXTURES / HDRI / CACHE /
+LOGLEVEL` (ver `scripts/cityconfig.py`). Las respuestas de OSM se cachean en
+`MAPS3D_CACHE` (o `~/.cache/maps-to-3d`) para no re-consultar Overpass.
+
 ## Loop de evaluación (el corazón)
 Render → bajar la **referencia real** de esa misma vista (Street View / satélite) →
 **panel adversarial** de agentes (materiales / geometría / luz / gestalt) que puntúa y
@@ -58,21 +68,33 @@ OpenStreetMap · PolyHaven. Qué es real vs inferido → `SKILL.md`.
 14 colecciones) · `world_scene.py` (orquesta OSM headless) · `render_view.py` (vista para
 comparar) · `get_textures.py` (PBR+HDRI) · `live_build.py` (build en Blender vivo via blender-mcp).
 
-## Roadmap (research + review)
-- **Motor geométrico:** apoyarse en **OSM2World / BlenderGIS / blosm** para el modo OSM en
-  vez de mantener a mano gran parte de `blender_build.py`; separar **fuentes → CityScene
-  normalizada → render**.
+## Ya implementado (núcleo open source)
+Módulos puros y testeables (`scripts/city*.py`, sin `bpy`), cubiertos por **36 tests** (`tests/`):
+- **Identidad por edificio** — cada uno conserva `osm_id`, `name`, `height_source`
+  (explicit/levels/default), `confidence` y `source`.
+- **Techos reales por `roof:shape`** — a dos aguas / hipped / piramidal / cúpula /
+  skillion / parapeto, con variedad por posición cuando no hay tag.
+- **Perfiles urbanos** (`modern_towers`, `historic_center`, `industrial`, `informal_dense`,
+  `residential_lowrise`) clasificados por **estadística OSM, sin nombrar ciudades** →
+  generaliza a cualquier lugar.
+- **Landmarks geofenced** — solo dentro de su geocerca (una pasarela ≠ Puente de la Mujer);
+  Villa 31 no genera landmarks falsos.
+- **Cámara segura** — nunca queda dentro de un edificio (se reubica a la calle más cercana).
+- **Adaptador OSM2World** opcional (`OSM2WORLD_JAR`); el generador procedural sigue por defecto.
+- **Loop Blender-MCP** documentado ([`docs/MCP_LOOP.md`](docs/MCP_LOOP.md), `scripts/mcp_loop.py`)
+  con *safe-clear* (nunca `read_factory_settings`).
+
+## Roadmap (pendiente)
 - **LOD por SSE** (screen-space-error) en 3D Tiles en vez del near-test OBB; **atribución +
-  modo efímero** para publicar.
-- **Techos reales** (`roof:shape`), **materiales por tag OSM** (`building:material/colour`),
-  **cascada de alturas** (levels×3m + jitter), **identidad por edificio** (ID OSM por
-  instancia via atributos/Geometry Nodes).
-- **Landmarks geofenced / por ID OSM** (no reglas globales: una pasarela ≠ Puente de la Mujer).
-- **Perfiles urbanos** (`informal_dense`, `historic_center`, `industrial`, `modern_towers`).
-- **Chequeos automáticos** de escena (cámara fuera de edificios, landmarks improbables,
-  siluetas/alturas, 4 vistas de control, snapshots de regresión).
+  modo efímero** para poder publicar el modo EXACTO (Google 3D Tiles).
+- Separar de forma más estricta **fuentes → CityScene normalizada → render**.
 - **Imágenes abiertas** (KartaView/Mapillary) y **fotogrametría propia** (OpenDroneMap)
   cuando no hay Google; **py3dtiles** para datasets propios.
+
+## Contribuir / licencias
+Cómo instalar, testear y extender: [`CONTRIBUTING.md`](CONTRIBUTING.md) · reporte completo
+de fuentes y licencias: [`docs/SOURCES_LICENSES.md`](docs/SOURCES_LICENSES.md) ·
+adaptador OSM2World: [`docs/OSM2WORLD.md`](docs/OSM2WORLD.md) · licencia del código: **[MIT](LICENSE)**.
 
 ## Licencia / atribución
 Geometría OSM © colaboradores de OpenStreetMap (**ODbL**). Google 3D Tiles/satélite:
