@@ -74,10 +74,15 @@ Los **landmarks, materiales y cámaras** no se mezclan con la descarga de datos.
 corregir -> repetir 3-6 veces -> guardar `.blend`/renders/reporte.
 
 ## Criterios de aceptacion (tracking)
-- [ ] Villa 31 sin landmarks falsos -> **F1a**
-- [ ] Camara de calle no atraviesa edificios -> **F1b**
-- [ ] Techos con variedad coherente por edificio -> **F2c/F3a**
-- [ ] Cada objeto con procedencia + confidence -> **F2a**
-- [ ] Pipeline funciona sin Google API -> ya (modo OSM)
-- [ ] Tests reproducibles + documentacion -> **F1c** + docs
-- [ ] Flujos existentes siguen funcionando -> **F0**
+- [x] Villa 31 sin landmarks falsos -> **F1a** (`citylandmarks.py`, geofence; test)
+- [x] Camara de calle no atraviesa edificios -> **F1b** (`citycamera.safe_street_point`, en `render_view`; test)
+- [x] Techos con variedad coherente por edificio -> **F2c** (`cityroofs.choose_roof_kind` + builders bmesh) **/ F3a** (sesgo por perfil). Validado en Rothenburg (232 gabled) y Brickell.
+- [x] Cada objeto con procedencia + confidence -> **F2a** (`parse_osm`: `osm_id/name/roof_shape/height_source/confidence/source`; test)
+- [x] Pipeline funciona sin Google API -> ya (modo OSM)
+- [x] Tests reproducibles + documentacion -> **F1c** (`tests/test_core.py`, 17 tests puros) + docs
+- [x] Flujos existentes siguen funcionando -> **F0** (render_view/world_scene/live_build intactos; render Brickell+Rothenburg OK)
+
+### Estado de fases
+- **F1a/F1b/F1c** ✅ en main. **F2a** ✅. **F2c** ✅. **F3a** ✅ (perfiles: modern_towers/historic_center/industrial/informal_dense/residential_lowrise/mixed).
+- **F3b** adaptador OSM2World (opt-in, no borra el generador Python), **F4** packaging (pyproject/CLI/config/log/cache/report), **F5** loop MCP documentado -> en curso (workflow).
+- Perfil arquitectonico clasificado por estadisticas OSM, **sin nombrar ciudades** -> se mantiene la generalizacion.
