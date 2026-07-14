@@ -19,6 +19,9 @@ te devuelve:
 ![Ejemplo: Puerto Madero, Buenos Aires](docs/example-puerto-madero.png)
 *Puerto Madero, Buenos Aires — `--radius 250`. Se ven los diques (agua en azul) y las torres altas con su altura real.*
 
+![Ejemplo: cruce ferroviario de Federico Lacroze](docs/example-lacroze-puente.png)
+*Cruce del FC Mitre en Federico Lacroze — `--radius 180`. Las vías del tren (marrón) y la pasarela peatonal elevada sobre ellas con sus pilares.*
+
 ## Cómo funciona
 
 ```
@@ -28,7 +31,8 @@ lugar de Google Maps
    │       (sigue links cortos maps.app.goo.gl, o geocodifica con Google)
    │
    ├─▶ 2. OpenStreetMap (Overpass API, gratis, sin key)
-   │       edificios + alturas, calles, agua, parques
+   │       edificios + alturas, calles, vías de tren, agua, parques
+   │       (los puentes `bridge=yes` se elevan con pilares)
    │
    ├─▶ 3. (opcional) Google Street View + fotos del lugar  ← necesita API key
    │
