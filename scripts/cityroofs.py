@@ -41,13 +41,18 @@ def _hash01(seed):
     return n - math.floor(n)
 
 
-def choose_roof_kind(roof_shape, height_m, seed=0.0, small_max=None):
+_LOW_BIAS = {"hipped", "gabled", "pyramidal", "skillion"}
+_HIGH_BIAS = {"flat", "parapet", "skillion"}
+
+
+def choose_roof_kind(roof_shape, height_m, seed=0.0, small_max=None, bias=None):
     """Devuelve uno de ROOF_KINDS.
 
-    - Si `roof_shape` (tag OSM) es conocido, se respeta.
-    - Si no, da variedad: los edificios bajos reciben aguas variadas
-      (hipped/gabled/pyramidal/skillion) y los altos azotea (parapet/flat),
-      elegidas por `seed` (posicion) para que la cuadra no sea monotona.
+    - Si `roof_shape` (tag OSM) es conocido, se respeta (maxima prioridad).
+    - Si no, y el perfil arquitectonico sugiere un `bias` compatible con la
+      altura, se aplica la mayor parte de las veces (mantiene coherencia de zona).
+    - Si tampoco, da variedad por `seed` (posicion): bajos -> aguas variadas,
+      altos -> azotea, para que la cuadra no sea monotona.
     """
     small_max = ROOF_SMALL_MAX_H if small_max is None else small_max
     if roof_shape:
@@ -56,6 +61,8 @@ def choose_roof_kind(roof_shape, height_m, seed=0.0, small_max=None):
             return _OSM_ROOF[rs]
     h = _hash01(seed)
     if height_m <= small_max:
+        if bias in _LOW_BIAS and h < 0.6:
+            return bias
         if h < 0.45:
             return "hipped"
         if h < 0.78:
@@ -63,4 +70,6 @@ def choose_roof_kind(roof_shape, height_m, seed=0.0, small_max=None):
         if h < 0.90:
             return "pyramidal"
         return "skillion"
+    if bias in _HIGH_BIAS and h < 0.6:
+        return bias
     return "parapet" if h < 0.55 else "flat"

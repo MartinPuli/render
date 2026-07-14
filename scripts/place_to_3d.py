@@ -734,10 +734,16 @@ def main():
     elif not api_key and not args.no_streetview:
         print("➌ (Sin GOOGLE_MAPS_API_KEY: salteo Street View/fotos)")
 
+    import cityprofiles
+    profile, profile_defaults = cityprofiles.classify(buildings)
+    print(f"   -> perfil arquitectonico: {profile}")
+
     scene = {
         "center": {"lat": lat, "lon": lon, "label": label},
         "radius": args.radius,
         "bounds": bounds,
+        "profile": profile,
+        "profile_defaults": profile_defaults,
         "buildings": buildings,
         "roads": roads,
         "areas": areas,
