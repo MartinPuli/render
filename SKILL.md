@@ -67,24 +67,45 @@ Cuando el usuario:
    - `--no-render` — solo bajar datos (util para inspeccionar `scene.json`).
    - `--blender PATH` — ruta al binario de Blender.
 
-3. **Mirar el resultado.** Usar la tool `Read` sobre `output/<slug>/render.png`
-   para ver el modelo 3D. Si hay `streetview/*.jpg` y `photos/*.jpg`, leerlas
-   tambien para comparar el modelo con el lugar real y describirle al usuario
-   que se ve.
+   **Sobre la API key (calidad):** el script corre igual sin key (modo gratis).
+   Si NO hay `GOOGLE_MAPS_API_KEY` configurada, **ofrecele al usuario** mejorar la
+   calidad: "Puedo bajar Street View y fotos reales del lugar si me pasás una API
+   key de Google Maps Platform (opcional, tiene costo/free-tier). Sin eso igual te
+   hago el 3D, con colores estimados." Nunca guardes la key en el repo: se pasa por
+   variable de entorno (`export GOOGLE_MAPS_API_KEY=...`).
 
-4. **Iterar si hace falta:**
+3. **Mirar el resultado.** Usar la tool `Read` sobre `output/<slug>/render.png`
+   para ver el modelo 3D. Describirle al usuario que se ve.
+
+4. **Afinar colores contra la realidad (si hay Street View).** Si existen
+   `streetview/*.jpg` y `photos/*.jpg`, leerlas con `Read`, compararlas con el
+   render y **ajustar los colores/materiales para que se parezcan al lugar real**
+   (ese es el valor de la API key). Editar las paletas `BUILDING_COLORS` /
+   `VARIED_NEUTRALS` en `scripts/place_to_3d.py`, o `scene.json` directo, y volver
+   a correr `blender_build.py`. Los tamaños/alturas ya son reales (de OSM), esto
+   es solo para el color.
+
+5. **Iterar si hace falta:**
    - Zona muy vacia o muy llena → ajustar `--radius`.
-   - Colores → editar las paletas `BUILDING_COLORS` / `VARIED_NEUTRALS` en
-     `scripts/place_to_3d.py`, o los materiales/luz en `scripts/blender_build.py`
-     (constantes arriba de todo: `SUN_ENERGY`, `EXPOSURE`, `CAM_*`).
+   - Luz / exposicion → `SUN_ENERGY`, `EXPOSURE` en `scripts/blender_build.py`.
    - Angulo/altura de camara → `CAM_ELEV_DEG`, `CAM_AZIM_DEG`, `CAM_DIST_FACTOR`.
 
-5. **Entregar** al usuario el `render.png` (con `SendUserFile`) y avisarle que
+6. **Entregar** al usuario el `render.png` (con `SendUserFile`) y avisarle que
    `model.blend` se puede abrir/editar en Blender.
+
+## Que es "exacto" y que no (aclararle al usuario)
+- **Tamanos y formas: reales.** Plantas y alturas de los edificios salen de OSM.
+- **Colores: estilizados.** OSM casi nunca trae el color real; se pintan por tipo.
+  Con Street View (API key) se pueden afinar a mano para parecerse al lugar.
+- **No** es una replica foto-realista con fachadas texturizadas. Para eso haria
+  falta Google *Photorealistic 3D Tiles* (Map Tiles API) — mas caro y complejo;
+  mencionarlo solo si el usuario pide exactitud foto-realista.
 
 ## Notas
 - Overpass/OSM a veces se satura: si da timeout, reintentar (el script ya prueba
-  dos endpoints). Un par de reintentos suele resolverlo.
+  varios endpoints). Un par de reintentos suele resolverlo.
 - Las alturas salen de los tags `height` / `building:levels` de OSM; si faltan se
-  estima por tipo de edificio. No es exacto pero da una maqueta creible.
+  estima por tipo de edificio. Es una maqueta creible, no un levantamiento exacto.
 - 1 unidad de Blender = 1 metro. La escena esta centrada en el lugar (0,0).
+- La API key es OPCIONAL y solo agrega imagenes reales de referencia. Nunca
+  hardcodearla ni commitearla: siempre por variable de entorno.
