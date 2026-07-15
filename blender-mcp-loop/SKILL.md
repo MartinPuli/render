@@ -1,148 +1,226 @@
 ---
 name: blender-mcp-loop
-description: >
-  Reconstruye un lugar de Google Maps en un Blender VIVO usando el servidor
-  blender-mcp (ahujasid/blender-mcp), y lo va refinando en un loop: construye la
-  zona, saca un screenshot del viewport, lo compara con las fotos reales de
-  Street View, y ajusta (alturas, colores, materiales, cielo HDRI, modelos de
-  landmarks) una y otra vez hasta que el render se parezca lo maximo posible a la
-  realidad. Usar cuando el usuario tiene blender-mcp conectado y quiere ver/armar
-  un lugar en su Blender local, iterar sobre el modelo, o "que quede igual al
-  lugar real". Triggers: "blender-mcp", "blender vivo", "en mi blender", "loop",
-  "que quede igual a la realidad", "indistinguible", "refina el modelo",
-  "street view vs blender", "landmark 3d".
+description: Construye y refina lugares reales dentro de un Blender vivo conectado por blender-mcp. Usar cuando el usuario pide convertir una ubicación, coordenadas o link de Google Maps en una escena Blender, especialmente si dice “Blender MCP”, “en mi Blender”, “one shot”, “que se parezca al lugar”, “Street View vs Blender”, aeropuerto, barrio, campus, puerto o infraestructura. Ejecuta preflight, backup, adquisición OSM/Google, capas semánticas, build seguro, cámara, dos renders, inspección visual, autocorrección, validación y guardado sin desconectar el addon.
 ---
 
-# blender-mcp-loop — Reconstruir un lugar en Blender vivo y refinar hasta que se parezca
+# Blender MCP loop
 
-Esta skill es el complemento "en vivo" de **maps-to-3d**. En vez de renderizar
-headless, usa el MCP **blender-mcp** para construir la escena dentro del Blender
-del usuario y **refinarla en un ciclo cerrado** comparando contra Street View.
+Operar un loop engineering cerrado hasta aprobar la escena o restaurar el mejor checkpoint. “One shot” describe la experiencia del usuario —no tiene que dirigir las iteraciones—, no una única ejecución interna. Usar `maps-to-3d` para los datos y este skill para operar el Blender vivo.
 
-## Requisitos (verificar primero)
-1. **blender-mcp conectado.** El usuario tiene que:
-   - Instalar el addon `addon.py` en Blender (Edit → Preferences → Add-ons →
-     Install), activar **"Interface: Blender MCP"**, y en la barra lateral del
-     3D View (tecla N → pestaña BlenderMCP) apretar **"Connect to Claude"**.
-   - Tener el MCP corriendo (`uvx blender-mcp`) y habilitado en el cliente.
-   - Verificalo llamando a `get_scene_info`. Si falla, pará y pedile al usuario
-     que conecte blender-mcp (no intentes seguir sin el MCP).
-2. **Los scripts de maps-to-3d** presentes en el repo (carpeta hermana
-   `../scripts/`): `place_to_3d.py`, `blender_build.py`, `live_build.py`.
-3. **Python + requests** para bajar los datos: `pip install requests`.
-4. **(Opcional pero MUY recomendado) `GOOGLE_MAPS_API_KEY`** — sin las fotos de
-   Street View no hay con qué comparar en el loop. Si no hay key, avisá que el
-   loop va "a ciegas" (solo mejoras generales) y ofrecé configurarla.
-5. Anotá la **ruta absoluta del repo** (`REPO`); la vas a usar en el código que
-   mandás a Blender.
+## Reglas críticas
 
-> ⚠ **CRÍTICO — no mates la conexión MCP.** NUNCA corras
-> `bpy.ops.wm.read_factory_settings()` en el Blender vivo: resetea Blender y
-> desregistra el addon blender-mcp, cortando la conexión (después `get_scene_info`
-> falla). Para limpiar la escena usá `blender_build.clear_scene()` (borra objetos
-> y datos, deja el addon intacto). `live_build.build(clear=True)` ya lo hace así.
->
-> 💡 **Foto-realismo (recomendado).** Antes de construir, bajá texturas PBR + HDRI
-> (`python3 REPO/scripts/get_textures.py REPO/textures`) y, en el código que mandás
-> a Blender, seteá `os.environ["MAPS3D_TEXTURES"]` y `os.environ["MAPS3D_HDRI"]` y
-> `blender_build.TEXTURE_DIR`/`HDRI_PATH` **antes** de `build_scene`. Da asfalto/
-> hormigón/corteza reales + cielo con nubes (reflejos en vidrio y agua).
->
-> 🖼 **Alternativa headless:** `scripts/world_scene.py` arma la escena completa
-> (colecciones + cámaras + luz + export + reporte) sin depender del MCP vivo.
+- Verificar primero con `get_scene_info` o una consulta equivalente.
+- Detenerse sólo si Blender MCP no responde. Explicar cómo conectar el addon.
+- Guardar un backup antes de limpiar.
+- Usar `blender_build.clear_scene()` o `live_build.build(clear=True)`.
+- Nunca ejecutar `bpy.ops.wm.read_factory_settings()` en Blender vivo: desregistra el addon y corta MCP.
+- Mantener API keys sólo en variables de entorno. No escribirlas en archivos, logs, código ni respuesta. Si el usuario pegó una key en el chat, recomendar rotarla/restringirla al terminar.
+- No afirmar exactitud fotográfica cuando OSM sólo aporta plantas y alturas estimadas.
 
-## El loop (pasos para Claude)
+## Gate de generalización
 
-### Paso 0 — Verificar el MCP
-`get_scene_info`. Si responde, blender-mcp está vivo. Si no, pará y pedí conexión.
+Antes de modificar el skill o sus scripts, clasificar el cambio:
 
-### Paso 1 — Bajar los datos del área
-Corré (en la terminal, no en Blender):
-```bash
-python3 REPO/scripts/place_to_3d.py "<LUGAR>" --radius 250 --no-render \
-        --out REPO/output/<slug>
-```
-Esto genera `scene.json`, y si hay API key, `streetview/heading_{000,090,180,270}.jpg`
-y `photos/*.jpg`. Guardá la ruta del `scene.json` y de las imágenes.
-El punto geocodificado queda en el origen (0,0) de la escena, en metros.
+- **Core general:** se activa por schema, tags OSM, métricas o capacidades de Blender. Puede entrar al core.
+- **Perfil semántico:** aeropuerto, puerto, ferrocarril, campus, costa, etc. Debe depender de tags, no del nombre del lugar.
+- **Ajuste de escena:** cámara, material o asset elegido para una ejecución. Guardarlo en `output/<slug>` o en `scene.json`; no convertirlo en default global.
+- **Pack opcional:** landmark/asset propietario o local. Cargarlo explícitamente; nunca añadir su nombre o coordenadas al registro por defecto.
 
-### Paso 2 — Construir en el Blender vivo
-Con `execute_blender_code`, mandá este bootstrap (reemplazá `REPO` y `<slug>`,
-y elegí el heading de un Street View que tengas, ej. 90):
+Prohibir en el core cualquier regla del tipo `si ciudad == X`, geocerca preinstalada, nombre de landmark o coordenada concreta. Para promover una heurística, exigir un test sintético por tags y al menos un contraejemplo no relacionado. Una mejora visual en una sola escena no demuestra generalidad.
+
+## Transporte MCP
+
+Preferir las herramientas nativas `get_scene_info`, `execute_code`/`execute_blender_code` y `get_viewport_screenshot`.
+
+Si el cliente no expone esas herramientas pero el addon escucha en `127.0.0.1:9876`, usar el cliente instalado por blender-mcp:
+
 ```python
-import sys; sys.path.append(r"REPO/scripts")
-import importlib, live_build; importlib.reload(live_build)
-info = live_build.build(r"REPO/output/<slug>/scene.json",
-                        heading=90, sv_xy=(0.0, -8.0))
-print(info)
+from blender_mcp.server import BlenderConnection
+c = BlenderConnection("127.0.0.1", 9876)
+try:
+    result = c.send_command("execute_code", {"code": code})
+finally:
+    c.disconnect()
 ```
-- `heading` = mismo rumbo que la foto de Street View con la que vas a comparar.
-- `sv_xy` = posición de la cámara en metros. Si el origen cae dentro de un
-  edificio/monumento, corré la cámara unos metros (usá `live_build.building_at(
-  scene_path, 0, 0)` para detectarlo) hasta la calle.
 
-### Paso 3 — Realismo base (blender-mcp)
-- **Cielo/iluminación:** con PolyHaven, buscá y bajá un HDRI de cielo acorde a la
-  foto (despejado / nublado / atardecer) y ponelo como world. Da luz realista y
-  arregla el cielo apagado del setup básico.
-  (tools: `get_polyhaven_categories("hdris")`, `search_polyhaven_assets`,
-  `download_polyhaven_asset`.)
-- **Texturas (opcional):** PolyHaven tiene asfalto, veredas, hormigón; aplicalas
-  al piso/calles y a fachadas para acercarte a la realidad (`set_texture`).
+No confundir ausencia de una tool visible con ausencia del servidor: comprobar el puerto antes de pedir intervención.
 
-### Paso 4 — Screenshot del viewport
-`get_viewport_screenshot`. Guardá la imagen.
+## Loop engineering obligatorio
 
-### Paso 5 — Comparar sim vs realidad
-Leé con `Read` la foto real (`streetview/heading_090.jpg`) **y** el screenshot.
-Comparalos punto por punto y hacé una lista concreta de diferencias:
-- **Landmarks mal:** ¿algún edificio icónico salió como una caja genérica? (ej:
-  el Obelisco sale 9 m con techito, cuando es una aguja de ~67 m). Es lo primero
-  a arreglar.
-- **Alturas/proporciones** de los edificios del frente.
-- **Colores y materiales** (fachadas, vidriado, techos).
-- **Cielo/luz** (dirección del sol, tono).
-- **Cosas que faltan** (árboles, cartelería, la calle en primer plano).
+Aplicar siempre esta máquina de estados:
 
-### Paso 6 — Refinar (acá está la magia del loop)
-Aplicá los arreglos con `execute_blender_code` y los tools del MCP:
-- **Corregir alturas:** reescribí la altura de edificios clave y reconstruí, o
-  editá el objeto directo en Blender.
-- **Traer el landmark real** (lo que más acerca a "indistinguible"):
-  - **Sketchfab:** `search_sketchfab_models("Obelisco Buenos Aires")` →
-    `download_sketchfab_model` → posicionarlo en el origen y escalarlo.
-  - **Hyper3D Rodin:** `generate_hyper3d_model_via_images` pasándole la foto de
-    Street View del landmark → `poll_rodin_job_status` → `import_generated_asset`
-    → ubicarlo y escalarlo. Borrá la caja genérica que lo representaba.
-- **Materiales/colores:** ajustá con `apply_materials` o por código para igualar
-  la foto (ej. edificios blancos, vidrio azulado, cartel LED).
-- **Cámara:** afiná posición/heading/FOV para encuadrar como la foto.
-- **Vegetación/props:** sumá árboles (PolyHaven/Sketchfab) donde la foto los tenga.
+`preflight → baseline → observe → score → rank defect → hypothesize → change one family → checkpoint → compare delta → accept/continue/restore best`
 
-### Paso 7 — Repetir hasta que se parezca
-Volvé al Paso 4 (screenshot → comparar → refinar). **Criterio de corte:** parás
-cuando (a) las proporciones y los landmarks coinciden, (b) los colores/materiales
-y el cielo son creíbles, y (c) a primera vista el screenshot pasa por una foto del
-lugar — o cuando el usuario diga "listo". Hacé típicamente 3–6 pasadas; en cada
-una mostrale al usuario el screenshot y qué cambiaste. Si algo no cierra por falta
-de datos (fachadas exactas), decilo en vez de dar vueltas infinitas.
+No saltar de baseline a entrega. `one_shot_payload` sólo construye la iteración cero.
 
-## Notas de honestidad
-- "Indistinguible de la realidad" es la **meta** del loop, no una garantía: la
-  base viene de OSM (volúmenes + alturas) y de lo que consigas en PolyHaven /
-  Sketchfab / Hyper3D. Los landmarks quedan muy bien; una cuadra genérica sin
-  fachadas fotográficas queda "creíble", no idéntica.
-- `execute_blender_code` corre Python arbitrario en el Blender del usuario:
-  **guardá el .blend antes** y avisá.
-- Todo corre **en local** (el MCP se conecta al Blender del usuario); esta skill
-  no puede ejecutarse en un entorno headless sin el addon conectado.
+### 1. Preflight y backup
 
-## Un ciclo de ejemplo (Obelisco)
-1. `place_to_3d.py "Obelisco, Buenos Aires" --radius 250` → datos + Street View.
-2. `live_build.build(..., heading=90, sv_xy=(0,-8))` → ciudad + cámara en la calle.
-3. PolyHaven HDRI de cielo despejado.
-4. Screenshot → comparar con `heading_090.jpg`.
-5. Detectás: el Obelisco es una cajita → Sketchfab "Obelisco Buenos Aires",
-   importás, lo parás en (0,0) escalado a ~67 m; subís la altura de un par de
-   torres; ponés vidrio azulado en un edificio; sumás los carteles LED.
-6. Screenshot → comparar → ajustar → repetir hasta que pase por foto.
+1. Consultar la escena activa y anotar archivo, objetos, materiales y cámara.
+2. Crear `<out>/pre_<slug>.blend` antes del clear.
+3. Confirmar rutas absolutas del repo, `scripts/`, texturas y HDRI.
+4. No pedir confirmaciones si el lugar y Blender conectado ya están claros.
+
+### 2. Elegir radio y modo
+
+Usar estos valores iniciales, salvo que el usuario indique otro alcance:
+
+| Lugar | Radio |
+|---|---:|
+| Landmark/edificio | 250–350 m |
+| Barrio pequeño | 500–700 m |
+| Aeropuerto/campus/puerto | 900–1200 m |
+| Distrito amplio | 1200–1800 m |
+
+Usar OSM editable por defecto en Blender vivo. Usar Google Photorealistic 3D Tiles sólo si el usuario prioriza fotogrametría exacta y la Map Tiles API está habilitada.
+
+### 3. Generar datos completos
+
+Ejecutar desde la terminal:
+
+```bash
+python3 REPO/scripts/place_to_3d.py "<LUGAR>" --radius <M> --no-render --out REPO/output/<slug>
+```
+
+El generador debe producir `scene.json` con edificios, calles, agua/verde y `special_features`. Actualmente reconoce aeropuertos y conserva pistas, taxiways, plataformas y helipuertos con semántica propia. Street View usa sólo panoramas exteriores; la imagen satelital es la referencia aérea.
+
+Inspeccionar el resumen antes del build:
+
+- Si `scene_kind=airport`, exigir `special_feature_count > 0` cuando el encuadre contiene pistas/plataformas.
+- Si no hay edificios ni calles, no construir una escena vacía: ampliar radio o revisar geocodificación.
+- Usar `data_quality.building_heights` para distinguir alturas explícitas de estimadas.
+- No usar una foto interior para validar una fachada exterior.
+
+### 4. Construir el baseline
+
+Generar el código con `scripts/mcp_loop.py` y enviarlo completo a Blender:
+
+```python
+from mcp_loop import one_shot_payload
+code = one_shot_payload(
+    scene_path="REPO/output/<slug>/scene.json",
+    out_dir="REPO/output/<slug>",
+    slug="<slug>_mcp",
+    scripts_dir="REPO/scripts",
+    textures_dir="REPO/textures",
+    hdri_path="REPO/textures/sky.hdr",
+    engine="AUTO",
+    samples=48,
+    res=(1400, 1000),
+)
+```
+
+El payload realiza backup, clear seguro, build, selección compatible de Eevee/Cycles, aérea + oblicua, restauración de cámara, guardado y validación. Exigir `BASELINE_READY`; `ONE_SHOT_OK` queda sólo por compatibilidad.
+
+### 5. Inicializar el estado medible
+
+Usar `scripts/loop_engineering.py` en el proceso host:
+
+```python
+import loop_engineering as le
+state = le.new_state(
+    project="<slug>",
+    references=["reference_satellite.png"],
+    max_iterations=6,
+    target_score=85,
+    min_dimension=70,
+    min_delta=1.0,
+    patience=2,
+)
+```
+
+Persistirlo como `loop_state.json` después de cada observación con `le.save_state`. Nunca guardar el estado sólo en memoria conversacional.
+
+### 6. Observar y puntuar
+
+Abrir ambos renders y, si existe, la referencia satelital o Street View del mismo punto. Evaluar en este orden:
+
+1. `semantics`: capas críticas presentes y correctamente tipadas.
+2. `geometry`: escala, alturas, cubiertas, densidad y artefactos.
+3. `framing`: sujeto legible, sin cortes, misma vista que la referencia.
+4. `materials`: paleta, rugosidad, vidrio, asfalto, agua y vegetación.
+5. `lighting`: exposición, sombras, cielo y contraste.
+6. `realism`: lectura global y giveaways procedurales.
+
+Asignar 0–100 a las seis dimensiones. Registrar defectos como `{category, severity, impact, fix}`. Marcar `critical` cualquier falta semántica, escena vacía, cámara inválida, geometría rota o render quemado/negro.
+
+```python
+state = le.record_iteration(
+    state,
+    scores=scores,
+    defects=defects,
+    change=None,  # baseline
+    artifacts={"render": "...", "blend": "..."},
+)
+le.save_state(state, "<out>/loop_state.json")
+```
+
+### 7. Formular y aplicar un cambio controlado
+
+Consultar `le.decision(state)`. Si devuelve `correct_one_family`, tomar sólo `next_defect` y formular:
+
+- Observación verificable.
+- Hipótesis causal.
+- Una familia de cambio: `semantics`, `geometry`, `framing`, `materials`, `lighting` o `realism`.
+- Resultado esperado y métrica que debe subir.
+
+No mezclar cámara + materiales + luz en una iteración: impide atribuir el delta. Aplicar el fix por MCP, luego congelar el artefacto:
+
+```python
+code = mcp_loop.iteration_payload("<out>", iteration=N)
+```
+
+Abrir el nuevo PNG, puntuarlo contra la misma referencia/cámara y registrar:
+
+```python
+state = le.record_iteration(
+    state, scores=new_scores, defects=new_defects,
+    change={"category": "framing", "hypothesis": "...", "fix": "..."},
+    artifacts={"render": "loop_01.png", "blend": "loop_01.blend"},
+)
+```
+
+### 8. Decidir por evidencia
+
+- `deliver`: aceptar sólo con score ponderado ≥85, ninguna dimensión <70 y cero defectos críticos.
+- `correct_one_family`: continuar automáticamente hasta seis iteraciones.
+- `restore_best`: al llegar al máximo o acumular dos deltas <1 punto, abrir el `.blend` de `best_iteration` con `restore_checkpoint_payload` y verificar MCP nuevamente.
+
+Si una corrección baja el score, no acumularla como nueva base ganadora. Mantener el checkpoint anterior y cambiar de hipótesis.
+
+
+## Correcciones deterministas
+
+| Síntoma | Corrección |
+|---|---|
+| Vista demasiado abierta | Acercar cámara y mover `Target` al sujeto; conservar una aérea general |
+| Pasto domina la imagen | Bajar saturación/luminancia; en aeropuertos no dispersar árboles sobre grass/meadow |
+| Aeropuerto parece barrio | Forzar techos planos y paleta vidrio/acero/hormigón; usar `special_features` |
+| Pistas ausentes | Revisar radio y que la consulta incluya `aeroway`; no inventarlas manualmente antes de reconsultar |
+| Motor no existe | Probar `BLENDER_EEVEE_NEXT`, `BLENDER_EEVEE`, luego `CYCLES` |
+| Look de color no existe | Probar `Medium High Contrast`, variante AgX, luego `None` |
+| Cámara dentro de edificio | Usar `citycamera.safe_street_point` |
+| Street View no coincide | Confirmar `source=outdoor`, ubicación, heading y FOV; si no hay exterior, usar satélite/fotos |
+| Landmark genérico | Reemplazar sólo con asset verificable de Hyper3D/Sketchfab o modelado procedural específico |
+
+## Contrato de aceptación
+
+No declarar “listo” hasta comprobar:
+
+- MCP sigue respondiendo.
+- Existe backup, `.blend`, render aéreo, render oblicuo y reporte; cada archivo es no vacío.
+- Hay cámara activa, meshes y materiales.
+- La cámara aérea queda activa al guardar.
+- La escena especial conserva sus capas críticas.
+- Los renders fueron abiertos e inspeccionados, no sólo generados.
+- Existe `loop_state.json` con baseline, scores, deltas, cambios y `best_iteration`.
+- El resultado entregado corresponde al checkpoint ganador, no necesariamente al último.
+- La entrega distingue datos reales, estimaciones y proxies.
+
+Entregar links absolutos al `.blend`, ambos PNG, `scene.json` y reporte. Mostrar el mejor render en la respuesta.
+
+## Límites honestos
+
+- OSM aporta trazado real, pero muchas alturas/fachadas son estimadas.
+- Street View puede no tener cobertura exterior.
+- Los aviones/autos/árboles procedurales aportan escala, no estado real del lugar.
+- “One shot” significa un loop engineering autónomo sin microgestión del usuario, no una sola llamada ni una garantía de réplica perfecta sin datos suficientes.

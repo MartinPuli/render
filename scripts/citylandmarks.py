@@ -1,27 +1,13 @@
-"""
-citylandmarks.py — registro de landmarks con GEOFENCING (modulo puro, sin bpy).
+"""Registro OPCIONAL de landmarks externos (modulo puro, sin bpy).
 
-Un landmark solo se genera si el centro de la escena cae dentro de su geofence
-(y, opcionalmente, si matchea nombre/tipo OSM). Evita las "reglas globales" que
-disparaban landmarks falsos: p.ej. cualquier pasarela elevada NO es el Puente de
-la Mujer — solo lo es en Puerto Madero. Asi Villa 31 no genera un puente falso.
-
-Para agregar un landmark: sumar una entrada a LANDMARKS con su geofence y el
-nombre de la funcion `builder` (definida en blender_build.py).
+El core no contiene ciudades, nombres ni coordenadas concretas. Los landmarks
+normales se extraen de tags OSM en ``place_to_3d.parse_special_features``. Esta
+API queda para packs privados/opcionales que el caller pase explicitamente.
 """
 import math
 
-LANDMARKS = [
-    {
-        "key": "puente_de_la_mujer",
-        "name": "Puente de la Mujer",
-        "lat": -34.60840,
-        "lon": -58.36380,
-        "radius_m": 300.0,
-        "builder": "add_puente_mujer",     # funcion en blender_build.py
-        "match_names": ["puente de la mujer"],  # opcional: verificar nombre OSM
-    },
-]
+# Deliberadamente vacio: no agregar lugares concretos al core.
+LANDMARKS = []
 
 
 def haversine_m(lat1, lon1, lat2, lon2):
@@ -33,10 +19,10 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return 2 * r * math.asin(min(1.0, math.sqrt(a)))
 
 
-def landmarks_for_center(lat, lon):
-    """Landmarks cuyo geofence contiene (lat, lon). Vacio si ninguno aplica."""
+def landmarks_for_center(lat, lon, landmarks=None):
+    """Filtra un pack explicito por geofence. Sin pack devuelve vacio."""
     out = []
-    for lm in LANDMARKS:
+    for lm in (LANDMARKS if landmarks is None else landmarks):
         if haversine_m(lat, lon, lm["lat"], lm["lon"]) <= lm["radius_m"]:
             out.append(lm)
     return out

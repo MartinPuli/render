@@ -4,8 +4,8 @@ cityprofiles.py — perfiles arquitectonicos de una zona (modulo puro, sin bpy).
 En vez de reglas globales por ciudad (que ensuciaban la generalizacion), se
 CLASIFICA la zona a partir de estadisticas reales de sus edificios OSM y se
 derivan defaults con los que rellenar huecos cuando OSM viene pobre (sin altura,
-sin roof:shape, sin material). Asi Villa 31 se reconstruye como 'informal_dense'
-(bloques bajos, techos planos) y Puerto Madero/Brickell como 'modern_towers'
+sin roof:shape, sin material). Asi los tejidos bajos densos se clasifican como
+'informal_dense' y los distritos de torres como 'modern_towers'
 (torres, azotea), sin nombrar ninguna ciudad.
 
 Testeable sin Blender ni Overpass. Se engancha en place_to_3d (adjunta

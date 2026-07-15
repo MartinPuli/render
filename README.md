@@ -9,7 +9,7 @@ Dos modos:
 
 | Modo | Geometría | Uso | Salida |
 |---|---|---|---|
-| **EXACTO** | **Google Photorealistic 3D Tiles** (malla fotogramétrica real, texturizada) | render foto-real de cualquier ciudad del mundo | **imágenes** (render-only, ver ToS) |
+| **EXACTO** | **Google Photorealistic 3D Tiles** (malla fotogramétrica real, texturizada) | render foto-real donde Google tenga cobertura | **imágenes** (render-only, ver ToS) |
 | **ESTILIZADO** | **OpenStreetMap** (extrusión de volúmenes) + materiales PBR/procedurales | maqueta liviana, editable, redistribuible | `.blend` + GLB + `report.json` |
 
 ## ⚠️ Compliance — leer antes de usar en producción
@@ -39,13 +39,20 @@ python3 scripts/place_to_3d.py "<lugar>" --radius 350 --no-render --out output/<
 python3 scripts/get_textures.py textures       # PBR + HDRI (opcional)
 blender -b -P scripts/world_scene.py -- output/<lugar>/scene.json output/<lugar> <lugar> --export glb
 ```
+
+Con Blender MCP conectado, usar `blender-mcp-loop`.
+`scripts/mcp_loop.py::one_shot_payload` crea el baseline sin desconectar el addon;
+`scripts/loop_engineering.py` registra scores, defectos, cambios, deltas y el mejor
+checkpoint hasta aprobar o restaurar el ganador. `place_to_3d.py` conserva capas
+especiales de aeropuerto (`aeroway`) y baja Street View exterior + referencia
+satelital para QA.
 Requiere **Blender 5.x** (binario o módulo `bpy`). Probado con `/Applications/Blender.app`.
 
 ## Instalación como paquete (opcional)
 ```bash
 python3 -m pip install -e .           # expone el CLI `place2blender`
 place2blender "<lugar>" --radius 350 --no-render
-python3 -m pytest tests/ -q           # 36 tests puros (sin Blender ni Overpass)
+python3 -m pytest tests/ -q           # 56 tests puros (sin Blender ni Overpass)
 ```
 Config por entorno: `MAPS3D_RADIUS / SAMPLES / ENGINE / TEXTURES / HDRI / CACHE /
 LOGLEVEL` (ver `scripts/cityconfig.py`). Las respuestas de OSM se cachean en
@@ -53,7 +60,7 @@ LOGLEVEL` (ver `scripts/cityconfig.py`). Las respuestas de OSM se cachean en
 
 ## Loop de evaluación (el corazón)
 Render → bajar la **referencia real** de esa misma vista (Street View / satélite) →
-**panel adversarial** de agentes (materiales / geometría / luz / gestalt) que puntúa y
+evaluación adversarial (materiales / geometría / luz / gestalt) que puntúa y
 prioriza defectos → arreglar el #1 → re-render → re-evaluar. Protocolo best-practice
 (2AFC, pose-match, panel multi-familia, métricas CMMD/CLIP-IQA, regla de corte) en
 [`EVALUATION.md`](EVALUATION.md).
@@ -65,11 +72,12 @@ OpenStreetMap · PolyHaven. Qué es real vs inferido → `SKILL.md`.
 ## Scripts
 `place_to_3d.py` (lugar→OSM+StreetView→scene.json) · `fetch_3dtiles.py` (baja 3D Tiles) ·
 `import_3dtiles.py` (importa+ilumina+render) · `blender_build.py` (geometría+materiales OSM,
-14 colecciones) · `world_scene.py` (orquesta OSM headless) · `render_view.py` (vista para
-comparar) · `get_textures.py` (PBR+HDRI) · `live_build.py` (build en Blender vivo via blender-mcp).
+15 colecciones) · `world_scene.py` (orquesta OSM headless) · `render_view.py` (vista para
+comparar) · `get_textures.py` (PBR+HDRI) · `live_build.py` (build en Blender vivo via blender-mcp) ·
+`mcp_loop.py` (payloads/checkpoints MCP) · `loop_engineering.py` (estado + scoring + gates).
 
 ## Ya implementado (núcleo open source)
-Módulos puros y testeables (`scripts/city*.py`, sin `bpy`), cubiertos por **36 tests** (`tests/`):
+Módulos puros y testeables (`scripts/city*.py`, sin `bpy`), cubiertos por **56 tests** (`tests/`):
 - **Identidad por edificio** — cada uno conserva `osm_id`, `name`, `height_source`
   (explicit/levels/default), `confidence` y `source`.
 - **Techos reales por `roof:shape`** — a dos aguas / hipped / piramidal / cúpula /
@@ -77,9 +85,11 @@ Módulos puros y testeables (`scripts/city*.py`, sin `bpy`), cubiertos por **36 
 - **Perfiles urbanos** (`modern_towers`, `historic_center`, `industrial`, `informal_dense`,
   `residential_lowrise`) clasificados por **estadística OSM, sin nombrar ciudades** →
   generaliza a cualquier lugar.
-- **Landmarks geofenced** — solo dentro de su geocerca (una pasarela ≠ Puente de la Mujer);
-  Villa 31 no genera landmarks falsos.
+- **Landmarks por tags OSM** — `memorial=obelisk`, `man_made=tower/mast/chimney`
+  y monumentos con altura se normalizan sin nombres ni coordenadas hardcodeadas.
 - **Cámara segura** — nunca queda dentro de un edificio (se reubica a la calle más cercana).
+- **Infraestructura especial** — pistas, taxiways, plataformas y helipuertos conservan
+  anchos, materiales y marcas; no se convierten en calles genéricas.
 - **Adaptador OSM2World** opcional (`OSM2WORLD_JAR`); el generador procedural sigue por defecto.
 - **Loop Blender-MCP** documentado ([`docs/MCP_LOOP.md`](docs/MCP_LOOP.md), `scripts/mcp_loop.py`)
   con *safe-clear* (nunca `read_factory_settings`).

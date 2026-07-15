@@ -442,9 +442,186 @@ def build_overpass_query(south, west, north, east):
   way["leisure"~"park|garden|pitch|playground"]({b});
   way["landuse"~"grass|forest|meadow|recreation_ground|village_green"]({b});
   way["natural"~"wood|scrub|grassland"]({b});
+  way["aeroway"~"^(runway|taxiway|apron|helipad)$"]({b});
+  relation["aeroway"="apron"]["type"="multipolygon"]({b});
+  nwr["memorial"="obelisk"]({b});
+  nwr["man_made"~"^(obelisk|tower|mast|chimney)$"]({b});
+  nwr["historic"="monument"]["height"]({b});
 );
 out geom;
 """.strip()
+
+
+AIRPORT_LINE_WIDTH = {
+    "runway": 45.0,
+    # 10 m evita que taxilanes/gate lead-ins sin tag width se fusionen en
+    # grandes manchas. Las taxiways principales con width explicito lo respetan.
+    "taxiway": 10.0,
+}
+
+
+def _tag_meters(value, default):
+    """Parsea un ancho OSM simple ("45", "45 m", "150 ft")."""
+    if value is None:
+        return float(default)
+    m = re.search(r"(-?\d+(?:\.\d+)?)", str(value))
+    if not m:
+        return float(default)
+    n = float(m.group(1))
+    if "ft" in str(value).lower() or "feet" in str(value).lower():
+        n *= 0.3048
+    return max(0.5, n)
+
+
+def parse_special_features(data, project):
+    """Extrae infraestructura que no debe degradarse a una calle generica.
+
+    La primera familia soportada es ``aeroway``: pistas/calles de rodaje como
+    lineas con ancho real y plataformas/helipuertos como superficies. El schema
+    queda deliberadamente generico para sumar puertos, estadios u otras capas.
+    """
+    features = []
+
+    def to_xy(geom):
+        return [project(p["lat"], p["lon"]) for p in geom
+                if "lat" in p and "lon" in p]
+
+    def add_surface(tags, geom, osm_id=None, osm_type=None):
+        pts = to_xy(geom)
+        if len(pts) < 4:
+            return
+        features.append({
+            "geometry": "surface",
+            "kind": tags.get("aeroway", "surface"),
+            "polygon": pts,
+            "z": 0.085,
+            "name": tags.get("name") or tags.get("ref"),
+            "osm_id": osm_id,
+            "osm_type": osm_type,
+            "source": "osm",
+        })
+
+    for el in data.get("elements", []):
+        tags = el.get("tags", {}) or {}
+        kind = tags.get("aeroway")
+        etype = el.get("type")
+        if kind in AIRPORT_LINE_WIDTH and etype == "way" and el.get("geometry"):
+            pts = to_xy(el["geometry"])
+            if len(pts) >= 2:
+                features.append({
+                    "geometry": "line",
+                    "kind": kind,
+                    "path": pts,
+                    "width": round(_tag_meters(tags.get("width"),
+                                                AIRPORT_LINE_WIDTH[kind]), 2),
+                    "z": 0.09 if kind == "runway" else 0.095,
+                    "name": tags.get("name") or tags.get("ref"),
+                    "surface": tags.get("surface"),
+                    "osm_id": el.get("id"),
+                    "osm_type": etype,
+                    "source": "osm",
+                })
+        elif kind in ("apron", "helipad"):
+            if etype == "way" and el.get("geometry"):
+                add_surface(tags, el["geometry"], el.get("id"), etype)
+            elif etype == "relation":
+                for mem in el.get("members", []):
+                    if mem.get("role") == "outer" and mem.get("geometry"):
+                        add_surface(tags, mem["geometry"], el.get("id"), etype)
+
+        # Landmarks genericos: la identidad viene de tags, nunca del nombre o
+        # de coordenadas embebidas en el core.
+        landmark_kind = None
+        if tags.get("memorial") == "obelisk" or tags.get("man_made") == "obelisk":
+            landmark_kind = "obelisk"
+        elif tags.get("man_made") in ("tower", "mast", "chimney"):
+            landmark_kind = tags["man_made"]
+        elif tags.get("historic") == "monument" and tags.get("height"):
+            landmark_kind = "monument"
+        if landmark_kind:
+            xy = None
+            if etype == "node" and "lat" in el and "lon" in el:
+                xy = project(el["lat"], el["lon"])
+            elif el.get("geometry"):
+                points = to_xy(el["geometry"])
+                if points:
+                    xy = (sum(p[0] for p in points) / len(points),
+                          sum(p[1] for p in points) / len(points))
+            if xy is not None:
+                default_h = {"obelisk": 35.0, "tower": 45.0,
+                             "mast": 40.0, "chimney": 35.0,
+                             "monument": 22.0}[landmark_kind]
+                features.append({
+                    "geometry": "point",
+                    "family": "landmark",
+                    "kind": landmark_kind,
+                    "point": [xy[0], xy[1]],
+                    "height": round(_tag_meters(tags.get("height"), default_h), 2),
+                    "width": round(_tag_meters(tags.get("width"), 6.0), 2),
+                    "height_source": "explicit" if tags.get("height") else "default",
+                    "name": tags.get("name"),
+                    "osm_id": el.get("id"),
+                    "osm_type": etype,
+                    "source": "osm",
+                })
+    # Overpass puede devolver el mismo apron como way etiquetado y como outer de
+    # una relation multipolygon. Deduplicar evita caras coplanares/z-fighting.
+    deduped, seen = [], set()
+    for feature in features:
+        if feature.get("geometry") == "surface":
+            pts = feature.get("polygon", [])
+            area = abs(sum(
+                pts[i][0] * pts[(i + 1) % len(pts)][1] -
+                pts[(i + 1) % len(pts)][0] * pts[i][1]
+                for i in range(len(pts))
+            )) * 0.5 if len(pts) >= 3 else 0.0
+            cx = sum(p[0] for p in pts) / max(1, len(pts))
+            cy = sum(p[1] for p in pts) / max(1, len(pts))
+            key = (feature.get("kind"), "surface",
+                   round(cx, 1), round(cy, 1), round(area, 0))
+        elif feature.get("geometry") == "point":
+            point = feature.get("point", [0, 0])
+            key = (feature.get("kind"), "point", round(point[0], 1),
+                   round(point[1], 1), feature.get("osm_id"))
+        else:
+            key = (feature.get("kind"), "line", feature.get("osm_id"))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(feature)
+    return deduped
+
+
+def clip_special_features(features, H):
+    """Recorta lineas/superficies especiales al mismo limite que la escena."""
+    out = []
+    for feature in features:
+        if feature.get("geometry") == "surface":
+            polygon = clip_polygon(feature.get("polygon", []), H)
+            if len(polygon) >= 3:
+                item = dict(feature)
+                item["polygon"] = polygon
+                out.append(item)
+        elif feature.get("geometry") == "line":
+            path = feature.get("path", [])
+            for i in range(len(path) - 1):
+                segment = clip_segment(path[i], path[i + 1], H)
+                if segment:
+                    item = dict(feature)
+                    item["path"] = [list(segment[0]), list(segment[1])]
+                    out.append(item)
+        elif feature.get("geometry") == "point":
+            x, y = feature.get("point", (0.0, 0.0))
+            if -H <= x <= H and -H <= y <= H:
+                out.append(dict(feature))
+    return out
+
+
+def classify_scene_kind(osm, label=""):
+    """Clasificacion conservadora usada para materiales/camara especializados."""
+    kinds = {(el.get("tags") or {}).get("aeroway") for el in osm.get("elements", [])}
+    if kinds & {"runway", "taxiway", "apron", "aerodrome"}:
+        return "airport"
+    return "urban"
 
 
 def fetch_overpass(query):
@@ -591,7 +768,8 @@ def download_streetview(lat, lon, out_dir, api_key):
     saved = []
     meta = requests.get(
         "https://maps.googleapis.com/maps/api/streetview/metadata",
-        params={"location": f"{lat},{lon}", "key": api_key}, timeout=30,
+        params={"location": f"{lat},{lon}", "source": "outdoor", "key": api_key},
+        timeout=30,
     ).json()
     if meta.get("status") != "OK":
         print(f"  Street View: sin cobertura acá ({meta.get('status')}). Salteando.")
@@ -602,7 +780,8 @@ def download_streetview(lat, lon, out_dir, api_key):
         r = requests.get(
             "https://maps.googleapis.com/maps/api/streetview",
             params={"size": "640x640", "location": f"{lat},{lon}",
-                    "heading": heading, "pitch": 8, "fov": 90, "key": api_key},
+                    "heading": heading, "pitch": 8, "fov": 90,
+                    "source": "outdoor", "key": api_key},
             timeout=30,
         )
         if r.status_code == 200 and r.content[:3] != b"<ht":
@@ -611,6 +790,35 @@ def download_streetview(lat, lon, out_dir, api_key):
             saved.append(str(p))
     print(f"  Street View: {len(saved)} imagenes guardadas en {sv_dir}")
     return saved
+
+
+def download_satellite_reference(lat, lon, radius_m, out_dir, api_key):
+    """Baja una referencia aerea comparable con el render one-shot.
+
+    Calcula un zoom que intenta encuadrar el diametro solicitado dentro de una
+    imagen de 640 px. Si Static Maps no esta habilitada, degrada sin abortar.
+    """
+    meters_per_px_z0 = 156543.03392 * max(0.05, math.cos(math.radians(lat)))
+    diameter = max(50.0, float(radius_m) * 2.25)
+    zoom = int(math.floor(math.log2(meters_per_px_z0 * 640.0 / diameter)))
+    zoom = max(1, min(20, zoom))
+    try:
+        response = requests.get(
+            "https://maps.googleapis.com/maps/api/staticmap",
+            params={
+                "center": f"{lat},{lon}", "zoom": zoom, "size": "640x640",
+                "scale": 1, "maptype": "satellite", "key": api_key,
+            },
+            timeout=30,
+        )
+    except requests.RequestException:
+        return None
+    if response.status_code != 200 or response.content[:3] == b"<ht":
+        return None
+    path = out_dir / "reference_satellite.png"
+    path.write_bytes(response.content)
+    print(f"  Referencia satelital: {path} (zoom {zoom})")
+    return str(path)
 
 
 def download_place_photos(lat, lon, out_dir, api_key, max_photos=4):
@@ -727,9 +935,13 @@ def main():
     project = make_projector(lat, lon)
     osm = fetch_overpass(build_overpass_query(south, west, north, east))
     buildings, roads, areas = parse_osm(osm, project)
+    special_features = parse_special_features(osm, project)
     # Recortar todo al radio pedido (Overpass devuelve calles largas enteras)
     buildings, roads, areas = clip_scene(buildings, roads, areas, args.radius)
-    print(f"   -> {len(buildings)} edificios, {len(roads)} calles, {len(areas)} areas (agua/verde)")
+    special_features = clip_special_features(special_features, args.radius)
+    scene_kind = classify_scene_kind(osm, label)
+    print(f"   -> {len(buildings)} edificios, {len(roads)} calles, {len(areas)} areas "
+          f"(agua/verde), {len(special_features)} capas especiales [{scene_kind}]")
 
     if not buildings and not roads:
         print("   ⚠ OSM no devolvió nada en esta zona. Probá otro lugar o más radio.")
@@ -741,12 +953,14 @@ def main():
     else:
         bounds = {"minx": -args.radius, "miny": -args.radius, "maxx": args.radius, "maxy": args.radius}
 
-    streetview, photos = [], []
+    streetview, photos, satellite_reference = [], [], None
     if api_key and not args.no_streetview:
         print("➌ Bajando Street View + fotos de Google...")
         try:
             streetview = download_streetview(lat, lon, out_dir, api_key)
             photos = download_place_photos(lat, lon, out_dir, api_key)
+            satellite_reference = download_satellite_reference(
+                lat, lon, args.radius, out_dir, api_key)
         except requests.RequestException as e:
             print(f"   (Google falló: {e})")
     elif not api_key and not args.no_streetview:
@@ -754,7 +968,30 @@ def main():
 
     import cityprofiles
     profile, profile_defaults = cityprofiles.classify(buildings)
+    if scene_kind == "airport":
+        # Terminales, hangares y cubiertas aeroportuarias casi siempre son
+        # planas. No pisar un roof:shape explicito de OSM.
+        profile = "industrial"
+        profile_defaults = {"default_height": 9.0,
+                            "roof_bias": "flat",
+                            "wall_hint": "concrete"}
+        airport_palette = [
+            [0.62, 0.67, 0.69],
+            [0.73, 0.76, 0.76],
+            [0.48, 0.56, 0.59],
+            [0.80, 0.81, 0.78],
+        ]
+        for idx, building in enumerate(buildings):
+            if not building.get("roof_shape"):
+                building["roof_shape"] = "flat"
+            # Vidrio/acero/hormigon neutro; evita la paleta residencial pastel.
+            building["color"] = airport_palette[idx % len(airport_palette)]
     print(f"   -> perfil arquitectonico: {profile}")
+
+    height_sources = {"explicit": 0, "levels": 0, "default": 0}
+    for building in buildings:
+        source = building.get("height_source", "default")
+        height_sources[source] = height_sources.get(source, 0) + 1
 
     scene = {
         "center": {"lat": lat, "lon": lon, "label": label},
@@ -762,11 +999,21 @@ def main():
         "bounds": bounds,
         "profile": profile,
         "profile_defaults": profile_defaults,
+        "scene_kind": scene_kind,
         "buildings": buildings,
         "roads": roads,
         "areas": areas,
+        "special_features": special_features,
         "streetview": streetview,
         "photos": photos,
+        "satellite_reference": satellite_reference,
+        "data_quality": {
+            "building_heights": height_sources,
+            "streetview_outdoor": bool(streetview),
+            "satellite_reference": bool(satellite_reference),
+            "special_feature_count": len(special_features),
+        },
+        "sources": ["OpenStreetMap", "Google references" if api_key else "OpenStreetMap only"],
     }
     scene_path = out_dir / "scene.json"
     scene_path.write_text(json.dumps(scene))

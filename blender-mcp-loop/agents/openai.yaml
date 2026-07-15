@@ -1,0 +1,4 @@
+interface:
+  display_name: "Blender MCP One-Shot"
+  short_description: "Lugares reales a Blender con QA automático"
+  default_prompt: "Usá $blender-mcp-loop para ejecutar el loop engineering completo en mi Blender y entregar el mejor checkpoint validado."

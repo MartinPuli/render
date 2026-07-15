@@ -77,7 +77,7 @@ ROOF_SMALL_MAX_H = 11.0  # edificios mas bajos que esto -> techo a dos aguas
 BEVEL = 0.18             # bisel de aristas de edificios (m)
 
 # --- Clasificacion de materiales por altura ---
-# En ciudades modernas (p.ej. Puerto Madero) las torres altas son cortina de
+# En distritos modernos las torres altas son cortina de
 # vidrio reflectante; lo intermedio, fachada moderna; lo bajo, mamposteria.
 GLASS_MIN_HEIGHT = 36.0     # >= esto -> torre de vidrio reflectante
 MODERN_MIN_HEIGHT = 20.0    # entre esto y GLASS -> tambien mayormente vidrio
@@ -148,9 +148,32 @@ def add_flat_polygon(bm, poly, z):
     pts = dedupe_ring(poly, closed=True)
     if len(pts) < 3:
         return
+    # OSM no garantiza el winding de cada outer ring. Forzar CCW para que la
+    # normal apunte +Z; de otro modo algunos aprons/areas salen negros en Cycles.
+    signed_area = sum(
+        pts[i][0] * pts[(i + 1) % len(pts)][1] -
+        pts[(i + 1) % len(pts)][0] * pts[i][1]
+        for i in range(len(pts))
+    )
+    if signed_area < 0:
+        pts.reverse()
     try:
         verts = [bm.verts.new((x, y, z)) for (x, y) in pts]
-        bm.faces.new(verts)
+        face = bm.faces.new(verts)
+        # Los aprons/areas OSM suelen ser concavos. Un ngon concavo puede
+        # triangularse distinto entre Eevee/Cycles y producir parches negros.
+        if len(verts) > 4:
+            try:
+                bmesh.ops.triangulate(bm, faces=[face],
+                                      quad_method="BEAUTY", ngon_method="BEAUTY")
+            except Exception:
+                pass
+        # El triangulador puede invertir triangulos individuales en ngons muy
+        # concavos. Corregir cada cara explicitamente hacia +Z.
+        bm.normal_update()
+        for flat_face in bm.faces:
+            if flat_face.normal.z < 0:
+                flat_face.normal_flip()
     except ValueError:
         pass
 
@@ -617,122 +640,6 @@ def scatter_cars(roads, cap=520, spacing=7.5):
     return buckets, glass_bm, count
 
 
-def _point_in_poly(poly, px, py):
-    inside = False
-    n = len(poly)
-    j = n - 1
-    for i in range(n):
-        xi, yi = poly[i]
-        xj, yj = poly[j]
-        if ((yi > py) != (yj > py)) and \
-           (px < (xj - xi) * (py - yi) / ((yj - yi) or 1e-9) + xi):
-            inside = not inside
-        j = i
-    return inside
-
-
-def _pedestrian_bridge(scene):
-    """Encuentra la pasarela peatonal mas larga que cruza agua (Puente de la Mujer):
-    primero footways elevados (bridge, z>1); si no, footways cuyo medio cae en agua."""
-    roads = scene.get("roads", [])
-    waters = [a["polygon"] for a in scene.get("areas", []) if a["color"][2] > a["color"][1]]
-
-    def is_ped(t):
-        return any(k in str(t) for k in ("foot", "path", "pedestrian", "cycle", "steps"))
-
-    def plen(pts):
-        return sum(math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
-                   for i in range(len(pts) - 1))
-
-    elevated = [r for r in roads if float(r.get("z", 0)) > 1.0 and is_ped(r.get("type"))]
-    if elevated:
-        return max(elevated, key=lambda r: plen(r["path"]))
-    # fallback: peatonal cuyo punto medio cae dentro de un agua
-    best, bestlen = None, 0.0
-    for r in roads:
-        if not is_ped(r.get("type")):
-            continue
-        pts = r["path"]
-        if len(pts) < 2:
-            continue
-        mx = sum(p[0] for p in pts) / len(pts)
-        my = sum(p[1] for p in pts) / len(pts)
-        if any(_point_in_poly(w, mx, my) for w in waters):
-            L = plen(pts)
-            if L > bestlen:
-                bestlen, best = L, r
-    return best
-
-
-def add_puente_mujer(scene, coll, deck_z=5.0):
-    """Puente de la Mujer estilizado (Calatrava): tablero + pilono inclinado blanco
-    + cables en abanico, ubicado sobre la pasarela peatonal que cruza el dique."""
-    r = _pedestrian_bridge(scene)
-    if not r:
-        return None
-    pts = [(float(p[0]), float(p[1])) for p in r["path"]]
-    if len(pts) < 2:
-        return None
-    seglen = [math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
-              for i in range(len(pts) - 1)]
-    total = sum(seglen) or 1.0
-    half, acc, mi = total / 2.0, 0.0, 0
-    for i, L in enumerate(seglen):
-        if acc + L >= half:
-            mi = i
-            break
-        acc += L
-    ax, ay = pts[mi]
-    bx, by = pts[mi + 1]
-    t = (half - acc) / (seglen[mi] or 1.0)
-    mx, my = ax + (bx - ax) * t, ay + (by - ay) * t
-    dl = seglen[mi] or 1.0
-    tx, ty = (bx - ax) / dl, (by - ay) / dl      # tangente del puente
-    nx, ny = -ty, tx                              # normal
-
-    bm = bmesh.new()
-    for i in range(len(pts) - 1):                 # tablero
-        add_road_strip(bm, [pts[i], pts[i + 1]], 5.0, deck_z)
-
-    base = (mx + nx * 3.0, my + ny * 3.0, deck_z)
-    top = (mx - nx * 11.0, my - ny * 11.0, deck_z + 42.0)  # pilono inclinado
-
-    def box_between(p0, p1, r0, r1):
-        vb, vt = [], []
-        for sx, sy in ((1, 1), (1, -1), (-1, -1), (-1, 1)):
-            vb.append(bm.verts.new((p0[0] + tx * sx * r0 + nx * sy * r0,
-                                    p0[1] + ty * sx * r0 + ny * sy * r0, p0[2])))
-            vt.append(bm.verts.new((p1[0] + tx * sx * r1 + nx * sy * r1,
-                                    p1[1] + ty * sx * r1 + ny * sy * r1, p1[2])))
-        for i in range(4):
-            j = (i + 1) % 4
-            try:
-                bm.faces.new((vb[i], vb[j], vt[j], vt[i]))
-            except ValueError:
-                pass
-
-    box_between(base, top, 1.4, 0.4)              # pilono
-    for k in range(1, 9):                          # cables en abanico
-        d = k / 9.0
-        axp = mx + tx * (d * total * 0.42)
-        ayp = my + ty * (d * total * 0.42)
-        anch = (axp + nx * 1.5, ayp + ny * 1.5, deck_z + 0.3)
-        w = 0.11
-        try:
-            c1 = bm.verts.new((top[0] - nx * w, top[1] - ny * w, top[2]))
-            c2 = bm.verts.new((top[0] + nx * w, top[1] + ny * w, top[2]))
-            c3 = bm.verts.new((anch[0] + nx * w, anch[1] + ny * w, anch[2]))
-            c4 = bm.verts.new((anch[0] - nx * w, anch[1] - ny * w, anch[2]))
-            bm.faces.new((c1, c2, c3, c4))
-        except ValueError:
-            pass
-    bm_to_object(bm, "Puente_de_la_Mujer",
-                 make_material("puente_mujer", (0.93, 0.93, 0.91),
-                               roughness=0.32, specular=0.5),
-                 coll=coll, merge=0.0)
-    return True
-
-
 def _add_boundary(coll, minx, miny, maxx, maxy, z=0.2):
     """Marco (loop de aristas) que delimita el area pedida, en 00_REFERENCE."""
     me = bpy.data.meshes.new("Area_boundary")
@@ -962,7 +869,7 @@ def _set_spec(bsdf, val):
 def make_glass_material(name, tint, mullion=MULLION_COLOR):
     """Cortina de vidrio reflectante con grilla de perfiles (antepechos horizontales
     + parantes verticales). El vidrio es oscuro y muy poco rugoso: refleja el cielo,
-    asi que a plena luz se ve azul/espejado, como las torres de Puerto Madero."""
+    asi que a plena luz se ve azul/espejado, como una cortina de vidrio real."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -1024,7 +931,7 @@ def make_glass_material(name, tint, mullion=MULLION_COLOR):
 
 def make_water_material(name, tint=WATER_COLOR):
     """Agua realista: oscura y muy poco rugosa (refleja el cielo) con micro-oleaje
-    por bump de ruido. En los diques de Puerto Madero se ve azul espejado."""
+    por bump de ruido. En canales y diques se ve azul espejado."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -1466,7 +1373,8 @@ def make_pbr_material(name, base, tile_m=6.0, rough_boost=1.0):
     return mat
 
 
-def bm_to_object(bm, name, mat, coll=None, merge=0.01, smooth=False):
+def bm_to_object(bm, name, mat, coll=None, merge=0.01, smooth=False,
+                 recalc_normals=True):
     """Convierte un bmesh en objeto, limpiando geometria (fusiona vertices
     duplicados y recalcula normales) y lo cuelga de la coleccion `coll`
     (o de la master si es None). smooth=True aplica sombreado suave (para copas
@@ -1476,10 +1384,11 @@ def bm_to_object(bm, name, mat, coll=None, merge=0.01, smooth=False):
             bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=merge)
         except Exception:
             pass
-    try:
-        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
-    except Exception:
-        pass
+    if recalc_normals:
+        try:
+            bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+        except Exception:
+            pass
     me = bpy.data.meshes.new(name)
     bm.normal_update()
     bm.to_mesh(me)
@@ -1499,6 +1408,7 @@ COLLECTION_NAMES = [
     "00_REFERENCE", "01_TERRAIN", "02_BUILDINGS", "03_ROADS", "04_SIDEWALKS",
     "05_VEGETATION", "06_WATER", "07_LANDMARKS", "08_BRIDGES", "09_RAILWAYS",
     "10_STREET_FURNITURE", "11_LIGHTING", "12_CAMERAS", "13_EXPORT",
+    "14_SPECIAL_INFRA",
 ]
 
 
@@ -1546,6 +1456,144 @@ def make_collections():
 
 def color_key(rgb):
     return (round(rgb[0], 3), round(rgb[1], 3), round(rgb[2], 3))
+
+
+def _polygon_centroid(poly):
+    if not poly:
+        return (0.0, 0.0)
+    pts = poly[:-1] if len(poly) > 2 and poly[0] == poly[-1] else poly
+    return (sum(p[0] for p in pts) / len(pts),
+            sum(p[1] for p in pts) / len(pts))
+
+
+def _add_aircraft_silhouette(bm, cx, cy, heading_deg=0.0, scale=1.0):
+    """Proxy liviano de avion para que una plataforma no quede vacia.
+
+    Es deliberadamente procedural: aporta escala/lectura aeroportuaria sin
+    afirmar que representa una aeronave real observada en esa posicion.
+    """
+    shape = [
+        (-18, 0), (-6, -1.5), (-2.0, -13), (2.0, -13), (4.5, -2.0),
+        (15, -1.2), (18, 0), (15, 1.2), (4.5, 2.0), (2.0, 13),
+        (-2.0, 13), (-6, 1.5),
+    ]
+    a = math.radians(heading_deg)
+    ca, sa = math.cos(a), math.sin(a)
+    poly = []
+    for x, y in shape:
+        x *= scale
+        y *= scale
+        poly.append((cx + x * ca - y * sa, cy + x * sa + y * ca))
+    add_prism(bm, poly, 0.22, 0.95)
+
+
+def build_special_features(scene, collections):
+    """Construye infraestructura OSM que necesita semantica propia.
+
+    Actualmente cubre ``aeroway`` con materiales, anchos y marcas correctos.
+    Devuelve un resumen para diagnostico y reportes one-shot.
+    """
+    features = scene.get("special_features", [])
+    if not features:
+        return {"features": 0, "aircraft": 0}
+
+    runway_bm, taxi_bm = bmesh.new(), bmesh.new()
+    white_bm, yellow_bm = bmesh.new(), bmesh.new()
+    apron_bm, helipad_bm = bmesh.new(), bmesh.new()
+    landmark_bm = bmesh.new()
+    aprons = []
+    landmark_count = 0
+    for feature in features:
+        kind = str(feature.get("kind", ""))
+        geometry = feature.get("geometry")
+        z = float(feature.get("z", 0.09))
+        if geometry == "line" and len(feature.get("path", [])) >= 2:
+            path = feature["path"]
+            width = float(feature.get("width", 45.0 if kind == "runway" else 18.0))
+            if kind == "runway":
+                add_road_strip(runway_bm, path, width, z)
+                add_lane_markings(white_bm, path, width, z, dash=18.0,
+                                  gap=12.0, mw=max(0.35, width * 0.012))
+            elif kind == "taxiway":
+                add_road_strip(taxi_bm, path, width, z)
+                add_lane_markings(yellow_bm, path, width, z, dash=1000.0,
+                                  gap=0.0, mw=max(0.16, width * 0.012))
+        elif geometry == "surface" and len(feature.get("polygon", [])) >= 3:
+            if kind == "apron":
+                add_flat_polygon(apron_bm, feature["polygon"], z)
+                aprons.append(feature["polygon"])
+            elif kind == "helipad":
+                add_flat_polygon(helipad_bm, feature["polygon"], z)
+        elif geometry == "point" and feature.get("family") == "landmark":
+            x, y = feature.get("point", (0.0, 0.0))
+            height = max(3.0, float(feature.get("height", 25.0)))
+            width = max(1.2, float(feature.get("width", 6.0)))
+            half = width * 0.5
+            footprint = [(x-half, y-half), (x+half, y-half),
+                         (x+half, y+half), (x-half, y+half)]
+            add_spire(landmark_bm, footprint, 0.0, height)
+            landmark_count += 1
+
+    coll = collections["14_SPECIAL_INFRA"]
+    if len(apron_bm.faces):
+        bm_to_object(apron_bm, "Airport_aprons",
+                     make_concrete_material("airport_apron", (0.42, 0.44, 0.45)),
+                     coll=coll, merge=0.0, recalc_normals=False)
+    else:
+        apron_bm.free()
+    if len(helipad_bm.faces):
+        bm_to_object(helipad_bm, "Airport_helipads",
+                     make_concrete_material("airport_helipad", (0.48, 0.50, 0.51)),
+                     coll=coll, merge=0.0, recalc_normals=False)
+    else:
+        helipad_bm.free()
+    if len(runway_bm.faces):
+        bm_to_object(runway_bm, "Airport_runways",
+                     make_asphalt_material("airport_runway"), coll=coll)
+    else:
+        runway_bm.free()
+    if len(taxi_bm.faces):
+        bm_to_object(taxi_bm, "Airport_taxiways",
+                     make_asphalt_material("airport_taxiway", (0.12, 0.125, 0.135)),
+                     coll=coll)
+    else:
+        taxi_bm.free()
+    if len(white_bm.faces):
+        bm_to_object(white_bm, "Airport_runway_markings",
+                     make_material("runway_white", (0.94, 0.95, 0.96),
+                                   roughness=0.65), coll=coll, merge=0.0)
+    else:
+        white_bm.free()
+    if len(yellow_bm.faces):
+        bm_to_object(yellow_bm, "Airport_taxiway_centerlines",
+                     make_material("taxi_yellow", (0.95, 0.58, 0.035),
+                                   roughness=0.65), coll=coll, merge=0.0)
+    else:
+        yellow_bm.free()
+
+    if len(landmark_bm.faces):
+        bm_to_object(landmark_bm, "OSM_landmarks",
+                     make_material("landmark_stone", (0.79, 0.78, 0.74),
+                                   roughness=0.62, specular=0.22),
+                     coll=collections["07_LANDMARKS"], merge=0.0)
+    else:
+        landmark_bm.free()
+
+    aircraft_bm = bmesh.new()
+    for idx, polygon in enumerate(aprons[:8]):
+        x, y = _polygon_centroid(polygon)
+        _add_aircraft_silhouette(aircraft_bm, x, y,
+                                 heading_deg=(idx * 47 + 20) % 360,
+                                 scale=0.82 + 0.07 * (idx % 4))
+    aircraft_count = min(8, len(aprons))
+    if len(aircraft_bm.faces):
+        bm_to_object(aircraft_bm, "Airport_aircraft_proxies",
+                     make_material("aircraft_white", (0.88, 0.91, 0.93),
+                                   roughness=0.48, metallic=0.06), coll=coll)
+    else:
+        aircraft_bm.free()
+    return {"features": len(features), "aircraft": aircraft_count,
+            "landmarks": landmark_count}
 
 
 # ---------------------------------------------------------------------------
@@ -1734,8 +1782,16 @@ def build_scene(scene):
                      make_material("puente", BRIDGE_MAT_COLOR, roughness=0.8, specular=0.1),
                      coll=C["08_BRIDGES"])
 
+    # --- Infraestructura especial (aeropuertos, etc.) -> 14 ---
+    special_summary = build_special_features(scene, C)
+
     # --- Arboles (plazas + veredas de avenidas) -> 05 ---
-    trunk_bm, fol_bm, cards_bm, ntrees = scatter_trees(areas, roads)
+    # En aeropuertos, no sembrar arboles en grass/meadow junto a pistas.
+    tree_areas = areas
+    if scene.get("scene_kind") == "airport":
+        tree_areas = [a for a in areas if str(a.get("type", "")) in
+                      ("park", "garden", "forest", "wood", "scrub")]
+    trunk_bm, fol_bm, cards_bm, ntrees = scatter_trees(tree_areas, roads)
     if len(trunk_bm.faces) > 0:
         bm_to_object(trunk_bm, "Troncos",
                      make_pbr_material("corteza", "bark", tile_m=2.2)
@@ -1805,22 +1861,16 @@ def build_scene(scene):
                 or make_concrete_material("Terreno", GROUND_COLOR))
     bm_to_object(bm, "Terreno", piso_mat, coll=C["01_TERRAIN"], merge=0.0)
 
-    # --- Landmarks: SOLO por geofence (nunca regla global). Una pasarela
-    #     cualquiera != Puente de la Mujer; Villa 31 no genera landmarks falsos. ---
-    try:
-        import citylandmarks
-        c = scene.get("center", {})
-        for lm in citylandmarks.landmarks_for_center(
-                float(c.get("lat", 0.0)), float(c.get("lon", 0.0))):
-            fn = globals().get(lm.get("builder", ""))
-            if fn:
-                fn(scene, C["07_LANDMARKS"])
-                print(f"[build] landmark: {lm['name']}")
-    except Exception as e:
-        print(f"[build] landmarks: {e}")
-
     # --- Marco del area pedida -> 00_REFERENCE ---
     _add_boundary(C["00_REFERENCE"], minx, miny, maxx, maxy)
+
+    try:
+        bpy.context.scene["maps3d_scene_kind"] = scene.get("scene_kind", "urban")
+        bpy.context.scene["maps3d_special_features"] = special_summary["features"]
+        bpy.context.scene["maps3d_aircraft_proxies"] = special_summary["aircraft"]
+        bpy.context.scene["maps3d_landmarks"] = special_summary["landmarks"]
+    except Exception:
+        pass
 
     return cx, cy, R
 
@@ -2026,7 +2076,16 @@ def setup_render(render_path):
         except Exception:
             pass
     except Exception:
-        scn.render.engine = "BLENDER_EEVEE_NEXT"
+        selected = None
+        for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "BLENDER_WORKBENCH"):
+            try:
+                scn.render.engine = engine
+                selected = engine
+                break
+            except Exception:
+                pass
+        if selected is None:
+            raise RuntimeError("No compatible Blender render engine found")
     scn.render.resolution_x = RES_X
     scn.render.resolution_y = RES_Y
     scn.render.resolution_percentage = 100
@@ -2053,12 +2112,12 @@ def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
     cx, cy, R = build_scene(scene)
-    setup_world()
+    setup_world(sky=False)
     setup_sun()
     setup_camera(cx, cy, R)
     setup_render(render_path)
 
-    n_obj = len(bpy.context.scene.collection.objects)
+    n_obj = len(bpy.data.objects)
     print(f"[blender] escena: {len(scene.get('buildings', []))} edificios, "
           f"{len(scene.get('roads', []))} calles, {len(scene.get('areas', []))} areas, "
           f"{n_obj} objetos, radio {R:.0f} m")

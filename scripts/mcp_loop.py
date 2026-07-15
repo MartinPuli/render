@@ -13,6 +13,11 @@ Publico:
     inspect_payload() -> str
     evaluate_payload() -> str
     correct_payload(sun_energy=None, exposure=None) -> str
+    backup_payload(path) -> str
+    validate_payload(render_path=None, blend_path=None) -> str
+    one_shot_payload(scene_path, out_dir, slug="scene", ...) -> str
+    iteration_payload(out_dir, iteration, ...) -> str
+    restore_checkpoint_payload(blend_path) -> str
     loop_plan(scene_path, reference=None, ...) -> list[dict]  # {step, purpose, code}
 
 Idea clave del loop: inspect (get_scene_info) -> SAFE clear (bb.clear_scene, NUNCA
@@ -103,13 +108,31 @@ def build_payload(scene_path, heading=None, sv_xy=(0.0, 0.0), height=2.5,
     return "\n".join(lines) + "\n"
 
 
-def render_payload(out_png, engine="BLENDER_EEVEE_NEXT", samples=None, res=None):
+def render_payload(out_png, engine="AUTO", samples=None, res=None):
     """Codigo para fijar engine/samples/resolucion y renderizar un still a out_png.
     Sirve tanto para el preview de cada iteracion como para el render final."""
     lines = [
         "import bpy",
         "scn = bpy.context.scene",
-        "scn.render.engine = %s" % _lit(engine),
+        "_preferred_engine = %s" % _lit(engine),
+        "_engine_candidates = ([_preferred_engine] if _preferred_engine != 'AUTO' else []) + "
+        "['BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'CYCLES']",
+        "_selected_engine = None",
+        "for _engine in _engine_candidates:",
+        "    try:",
+        "        scn.render.engine = _engine",
+        "        _selected_engine = _engine",
+        "        break",
+        "    except Exception:",
+        "        pass",
+        "if _selected_engine is None:",
+        "    raise RuntimeError('No compatible Blender render engine found')",
+        "for _look in ('Medium High Contrast', 'AgX - Medium High Contrast', 'None'):",
+        "    try:",
+        "        scn.view_settings.look = _look",
+        "        break",
+        "    except Exception:",
+        "        pass",
     ]
     if samples is not None:
         s = int(samples)
@@ -132,7 +155,7 @@ def render_payload(out_png, engine="BLENDER_EEVEE_NEXT", samples=None, res=None)
         "scn.render.resolution_percentage = 100",
         "scn.render.filepath = %s" % _lit(out_png),
         "bpy.ops.render.render(write_still=True)",
-        "print('[mcp_loop] rendered ->', %s)" % _lit(out_png),
+        "print('[mcp_loop] rendered', _selected_engine, '->', %s)" % _lit(out_png),
     ]
     return "\n".join(lines) + "\n"
 
@@ -143,6 +166,155 @@ def save_payload(blend_path):
         "import bpy\n"
         "bpy.ops.wm.save_as_mainfile(filepath=%s)\n"
         "print('[mcp_loop] saved ->', %s)\n" % (_lit(blend_path), _lit(blend_path))
+    )
+
+
+def backup_payload(backup_path):
+    """Guarda la escena viva antes del clear seguro. El payload one-shot vuelve
+    a guardar luego en la ruta final, por lo que el backup no queda activo."""
+    return (
+        "import bpy, os\n"
+        "os.makedirs(os.path.dirname(%s) or '.', exist_ok=True)\n" % _lit(backup_path) +
+        "bpy.ops.wm.save_as_mainfile(filepath=%s)\n" % _lit(backup_path) +
+        "print('[mcp_loop] backup ->', %s)\n" % _lit(backup_path)
+    )
+
+
+def validate_payload(render_path=None, blend_path=None, extra_paths=None):
+    """Validacion ejecutable dentro de Blender. Falla fuerte si el resultado no
+    es entregable, en vez de declarar exito con un render vacio."""
+    lines = [
+        "import bpy, os, json",
+        "_scene = bpy.context.scene",
+        "_checks = {",
+        "  'camera': _scene.camera is not None,",
+        "  'objects': len(bpy.data.objects) >= 4,",
+        "  'meshes': len(bpy.data.meshes) >= 1,",
+        "  'materials': len(bpy.data.materials) >= 1,",
+        "}",
+    ]
+    if render_path:
+        lines.append("_checks['render_file'] = os.path.isfile(%s) and os.path.getsize(%s) > 4096" %
+                     (_lit(render_path), _lit(render_path)))
+    if blend_path:
+        lines.append("_checks['blend_file'] = os.path.isfile(%s) and os.path.getsize(%s) > 4096" %
+                     (_lit(blend_path), _lit(blend_path)))
+    for idx, path in enumerate(extra_paths or []):
+        lines.append("_checks['extra_file_%d'] = os.path.isfile(%s) and os.path.getsize(%s) > 4096" %
+                     (idx, _lit(path), _lit(path)))
+    lines += [
+        "print('[mcp_loop] validation', json.dumps(_checks, sort_keys=True))",
+        "if not all(_checks.values()):",
+        "    raise RuntimeError('one-shot validation failed: %s' % _checks)",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def one_shot_payload(scene_path, out_dir, slug="scene", scripts_dir=None,
+                     textures_dir=None, hdri_path=None, engine="AUTO",
+                     samples=48, res=(1400, 1000), backup=True):
+    """Genera UN payload autocontenido para backup -> build -> render -> save ->
+    validate. Es el camino recomendado cuando el MCP permite ejecutar Python en
+    Blender pero no expone helpers especializados como tools separados."""
+    sp = _scripts_dir(scripts_dir)
+    out_dir = os.path.abspath(str(out_dir))
+    scene_path = os.path.abspath(str(scene_path))
+    slug = str(slug or "scene")
+    blend_path = os.path.join(out_dir, slug + ".blend")
+    render_path = os.path.join(out_dir, slug + "_aerial.png")
+    oblique_path = os.path.join(out_dir, slug + "_oblique.png")
+    backup_path = os.path.join(out_dir, "pre_" + slug + ".blend")
+    report_path = os.path.join(out_dir, slug + "_report.json")
+
+    lines = [
+        "import bpy, os, sys, json, importlib",
+        "os.makedirs(%s, exist_ok=True)" % _lit(out_dir),
+        "sys.path.insert(0, %s)" % _lit(sp),
+    ]
+    if textures_dir:
+        lines += ["os.environ['MAPS3D_TEXTURES'] = %s" % _lit(os.path.abspath(str(textures_dir)))]
+    if hdri_path:
+        lines += ["os.environ['MAPS3D_HDRI'] = %s" % _lit(os.path.abspath(str(hdri_path)))]
+    if backup:
+        lines.append(backup_payload(backup_path))
+    lines += [
+        "import blender_build as bb, live_build",
+        "importlib.reload(bb); importlib.reload(live_build)",
+        "_info = live_build.build(%s, heading=None, clear=True, standard_view=True)" %
+        _lit(scene_path),
+        "print('[mcp_loop] build info', json.dumps(_info, sort_keys=True))",
+        render_payload(render_path, engine=engine, samples=samples, res=res),
+        "_cam = bpy.context.scene.camera",
+        "_target = bpy.data.objects.get('Target')",
+        "_aerial_loc = _cam.location.copy()",
+        "_aerial_rot = _cam.rotation_euler.copy()",
+        "_aerial_angle = _cam.data.angle",
+        "if _target is not None:",
+        "    _vec = _cam.location - _target.location",
+        "    _cam.location = _target.location + _vec * 0.64",
+        "    _cam.location.z = _target.location.z + _vec.z * 0.52",
+        "_cam.data.angle = 0.96",
+        render_payload(oblique_path, engine=engine, samples=samples, res=(res[0], int(res[1] * 0.72))),
+        "_cam.location = _aerial_loc",
+        "_cam.rotation_euler = _aerial_rot",
+        "_cam.data.angle = _aerial_angle",
+        "bpy.context.scene.render.resolution_x = %d" % int(res[0]),
+        "bpy.context.scene.render.resolution_y = %d" % int(res[1]),
+        "bpy.context.scene.render.filepath = %s" % _lit(render_path),
+        save_payload(blend_path),
+        validate_payload(render_path, blend_path, extra_paths=[oblique_path]),
+        "_report = dict(_info)",
+        "_report.update({'role': 'baseline', 'blend': %s, 'render': %s, 'oblique': %s, 'engine': bpy.context.scene.render.engine, "
+        "'objects': len(bpy.data.objects), 'materials': len(bpy.data.materials)})" %
+        (_lit(blend_path), _lit(render_path), _lit(oblique_path)),
+        "with open(%s, 'w', encoding='utf-8') as _f:" % _lit(report_path),
+        "    json.dump(_report, _f, indent=2, ensure_ascii=False)",
+        "print('[mcp_loop] BASELINE_READY', json.dumps(_report, sort_keys=True))",
+        "print('[mcp_loop] ONE_SHOT_OK', json.dumps(_report, sort_keys=True))",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def iteration_payload(out_dir, iteration, engine="AUTO", samples=32,
+                      res=(1400, 1000), prefix="loop"):
+    """Renderiza y guarda un checkpoint comparable de una iteracion.
+
+    El scoring ocurre fuera de Blender con ``loop_engineering``; este payload
+    congela exactamente el artefacto que recibio ese score.
+    """
+    out_dir = os.path.abspath(str(out_dir))
+    index = int(iteration)
+    if index < 0:
+        raise ValueError("iteration must be >= 0")
+    stem = "%s_%02d" % (str(prefix), index)
+    render_path = os.path.join(out_dir, stem + ".png")
+    blend_path = os.path.join(out_dir, stem + ".blend")
+    lines = [
+        "import os, json, bpy",
+        "os.makedirs(%s, exist_ok=True)" % _lit(out_dir),
+        render_payload(render_path, engine=engine, samples=samples, res=res),
+        save_payload(blend_path),
+        validate_payload(render_path, blend_path),
+        "print('[mcp_loop] ITERATION_READY', json.dumps({"
+        "'iteration': %d, 'render': %s, 'blend': %s}, sort_keys=True))" %
+        (index, _lit(render_path), _lit(blend_path)),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def restore_checkpoint_payload(blend_path):
+    """Restaura el checkpoint ganador al terminar por estancamiento/max-iter.
+
+    Abrir un .blend no es factory reset, pero el caller debe verificar MCP otra
+    vez inmediatamente despues.
+    """
+    return (
+        "import bpy, os\n"
+        "_checkpoint = %s\n" % _lit(os.path.abspath(str(blend_path))) +
+        "if not os.path.isfile(_checkpoint):\n"
+        "    raise RuntimeError('checkpoint not found: %s' % _checkpoint)\n"
+        "bpy.ops.wm.open_mainfile(filepath=_checkpoint)\n"
+        "print('[mcp_loop] BEST_CHECKPOINT_RESTORED', _checkpoint)\n"
     )
 
 
@@ -187,7 +359,7 @@ def correct_payload(sun_energy=None, exposure=None):
 # ---------------------------------------------------------------------------
 
 def loop_plan(scene_path, reference=None, preview_png=None, final_png=None,
-              blend_path=None, engine="BLENDER_EEVEE_NEXT", samples=48):
+              blend_path=None, engine="AUTO", samples=48):
     """Devuelve la lista de pasos del loop vivo. Cada paso es un dict con
     'step', 'purpose' y 'code' (el string a mandar por execute_blender_code).
 

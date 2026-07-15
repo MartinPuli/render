@@ -13,26 +13,32 @@ import citylandmarks as cl   # noqa: E402
 import place_to_3d as p      # noqa: E402
 
 
-# --- F1a: landmarks SOLO por geofence (no reglas globales) ---
-def test_puente_in_puerto_madero():
-    keys = [l["key"] for l in cl.landmarks_for_center(-34.6084, -58.3638)]
-    assert "puente_de_la_mujer" in keys
+def test_core_has_no_preinstalled_location_tuning():
+    scripts = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    core = "\n".join(open(os.path.join(scripts, name), encoding="utf-8").read().lower()
+                     for name in ("citylandmarks.py", "place_to_3d.py", "blender_build.py"))
+    banned = ("puente de la mujer", "villa 31", "obelisco de buenos aires",
+              "puerto madero", "ezeiza")
+    assert not any(name in core for name in banned)
 
 
-def test_villa31_no_false_puente():
-    # Villa 31 / Retiro (~3 km del puente) NO debe generar el Puente de la Mujer.
-    keys = [l["key"] for l in cl.landmarks_for_center(-34.5830, -58.3800)]
-    assert "puente_de_la_mujer" not in keys
+# --- F1a: el core no contiene ciudades; packs externos son opt-in ---
+def test_core_landmark_registry_is_empty():
+    assert cl.LANDMARKS == []
+    assert cl.landmarks_for_center(0.0, 0.0) == []
 
 
-def test_far_place_no_landmarks():
-    assert cl.landmarks_for_center(48.8584, 2.2945) == []   # Paris
+def test_explicit_landmark_pack_can_be_geofenced():
+    pack = [{"key": "sample", "lat": 10.0, "lon": 20.0,
+             "radius_m": 100.0, "match_names": ["sample monument"]}]
+    assert [x["key"] for x in cl.landmarks_for_center(10.0, 20.0, pack)] == ["sample"]
+    assert cl.landmarks_for_center(11.0, 20.0, pack) == []
 
 
 def test_name_match_gate():
-    lm = cl.LANDMARKS[0]
-    assert cl.name_matches(lm, "Puente de la Mujer")
-    assert not cl.name_matches(lm, "Pasarela X")
+    lm = {"match_names": ["sample monument"]}
+    assert cl.name_matches(lm, "Sample Monument")
+    assert not cl.name_matches(lm, "Unrelated Feature")
 
 
 # --- Clipping: la geometria queda dentro del radio pedido ---
@@ -143,3 +149,86 @@ def test_roof_bias_applies_without_tag():
     assert "gabled" in kinds
     # el tag OSM siempre gana sobre el sesgo
     assert cr.choose_roof_kind("hipped", 8, bias="gabled") == "hipped"
+
+
+# --- Capas especiales: aeropuertos no se degradan a calles genericas ---
+def test_overpass_query_requests_airport_layers():
+    query = p.build_overpass_query(-1, -1, 1, 1)
+    assert '"aeroway"' in query
+    assert "runway" in query and "taxiway" in query and "apron" in query
+
+
+def test_parse_airport_special_features_and_widths():
+    project = p.make_projector(0.0, 0.0)
+    data = {"elements": [
+        {"type": "way", "id": 1,
+         "tags": {"aeroway": "runway", "width": "150 ft", "ref": "11/29"},
+         "geometry": [{"lat": 0.0, "lon": 0.0},
+                      {"lat": 0.001, "lon": 0.0}]},
+        {"type": "way", "id": 2, "tags": {"aeroway": "apron"},
+         "geometry": [{"lat": 0.0, "lon": 0.0},
+                      {"lat": 0.0, "lon": 0.001},
+                      {"lat": 0.001, "lon": 0.001},
+                      {"lat": 0.0, "lon": 0.0}]},
+    ]}
+    features = p.parse_special_features(data, project)
+    runway = next(f for f in features if f["kind"] == "runway")
+    apron = next(f for f in features if f["kind"] == "apron")
+    assert runway["geometry"] == "line"
+    assert abs(runway["width"] - 45.72) < 0.02
+    assert apron["geometry"] == "surface"
+    assert p.classify_scene_kind(data, "anything") == "airport"
+
+
+def test_clip_special_features_stays_inside_radius():
+    features = [{"geometry": "line", "kind": "runway", "width": 45,
+                 "path": [[-500, 0], [500, 0]]},
+                {"geometry": "surface", "kind": "apron",
+                 "polygon": [[-300, -300], [300, -300], [300, 300], [-300, 300]]}]
+    clipped = p.clip_special_features(features, 100)
+    assert clipped
+    for feature in clipped:
+        points = feature.get("path") or feature.get("polygon")
+        assert all(-100.0001 <= x <= 100.0001 and -100.0001 <= y <= 100.0001
+                   for x, y in points)
+
+
+def test_duplicate_apron_way_and_relation_is_removed():
+    ring = [{"lat": 0.0, "lon": 0.0}, {"lat": 0.0, "lon": 0.001},
+            {"lat": 0.001, "lon": 0.001}, {"lat": 0.0, "lon": 0.0}]
+    data = {"elements": [
+        {"type": "way", "id": 10, "tags": {"aeroway": "apron"},
+         "geometry": ring},
+        {"type": "relation", "id": 20,
+         "tags": {"aeroway": "apron", "type": "multipolygon"},
+         "members": [{"role": "outer", "geometry": ring}]},
+    ]}
+    features = p.parse_special_features(data, p.make_projector(0.0, 0.0))
+    assert len([f for f in features if f["kind"] == "apron"]) == 1
+
+
+def test_generic_osm_obelisk_becomes_landmark_without_place_name():
+    data = {"elements": [{
+        "type": "node", "id": 77, "lat": 10.0, "lon": 20.0,
+        "tags": {"memorial": "obelisk", "height": "42 m", "name": "Any Name"},
+    }]}
+    features = p.parse_special_features(data, p.make_projector(10.0, 20.0))
+    landmark = next(f for f in features if f.get("family") == "landmark")
+    assert landmark["kind"] == "obelisk"
+    assert landmark["height"] == 42.0
+    assert landmark["height_source"] == "explicit"
+    assert landmark["point"] == [0.0, 0.0]
+
+
+def test_generic_landmark_query_is_tag_driven():
+    query = p.build_overpass_query(-1, -1, 1, 1)
+    assert '"memorial"="obelisk"' in query
+    assert '"man_made"' in query
+    assert "Buenos Aires" not in query and "Ezeiza" not in query
+
+
+def test_scene_profile_cannot_be_triggered_by_place_name():
+    empty_osm = {"elements": []}
+    assert p.classify_scene_kind(empty_osm, "International Airport") == "urban"
+    tagged = {"elements": [{"tags": {"aeroway": "runway"}}]}
+    assert p.classify_scene_kind(tagged, "Unrelated Label") == "airport"

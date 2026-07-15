@@ -11,6 +11,11 @@ shot) until it matches.
 loop testable in plain CI (`tests/test_mcp_loop.py`) while the strings run inside
 the live Blender.
 
+`one_shot_payload(...)` creates the reproducible baseline. The primary engine is
+`scripts/loop_engineering.py`: score the baseline, rank one failure family,
+checkpoint a controlled change, measure the delta, then accept or restore the
+best checkpoint. “One shot” means no user micromanagement, not one internal call.
+
 ## The loop at a glance
 
 ```
@@ -20,7 +25,7 @@ get_scene_info            inspect / backup (what's there before we touch it)
 SAFE clear                bb.clear_scene()   <-- NEVER read_factory_settings
       |
       v
-bb.build_scene(scene)     buildings + roads + areas + landmarks
+bb.build_scene(scene)     buildings + roads + areas + special infrastructure
       |
       v
 setup_world / sun / camera
@@ -29,14 +34,17 @@ setup_world / sun / camera
 get_viewport_screenshot   (or a fast render_payload preview)
       |
       v
-evaluate vs reference     materials / sun / exposure / camera off?
+score vs reference        6 weighted dimensions + critical defects
       |
       v
-correct                   tweak exposure, sun energy, materials, camera
+change one family         hypothesis + expected metric
       |
-      +---------------------------------------------+
-      | repeat 3-6x until it matches the reference  |
-      +---------------------------------------------+
+      v
+checkpoint + delta        loop_NN.png + loop_NN.blend + loop_state.json
+      |
+      +--------------------------------------------------+
+      | accept gates / continue <= 6 / restore best      |
+      +--------------------------------------------------+
       |
       v
 save .blend  +  render final PNG  +  short report
@@ -90,9 +98,34 @@ restart, no lost MCP server.
 
 ## Driving it from `mcp_loop`
 
+For the autonomous path:
+
+```python
+from mcp_loop import one_shot_payload
+code = one_shot_payload(
+    "output/ezeiza/scene.json", "output/ezeiza", slug="ezeiza_mcp",
+    scripts_dir="scripts", textures_dir="textures", hdri_path="textures/sky.hdr",
+)
+# execute_blender_code(code=code)
+```
+
+Require `ONE_SHOT_OK` and treat it as `BASELINE_READY`, then open both PNGs.
+`render_payload` automatically falls
+back across `BLENDER_EEVEE_NEXT`, `BLENDER_EEVEE` and `CYCLES` and also handles
+look-name differences between Blender releases.
+
+Initialize `loop_engineering.new_state(...)`, record the six scores and defects,
+then use `mcp_loop.iteration_payload(...)` for each controlled correction.
+Persist every result with `loop_engineering.save_state(...)`. Accept at weighted
+score >=85, every dimension >=70, and zero critical defects. Stop after six
+iterations or two deltas below one point and restore `best_iteration`.
+
+For manual/granular iteration:
+
 `mcp_loop.loop_plan(scene_path, reference=...)` returns a list of steps, each a dict
 `{"step", "purpose", "code"}`. Send each `code` through `execute_blender_code` in
-order; loop over the `screenshot -> evaluate -> correct` steps 3-6 times before the
+order; loop over the `screenshot -> evaluate -> correct` steps only while the
+score improves (maximum six controlled iterations) before the
 final `save+render`:
 
 ```python
@@ -114,6 +147,10 @@ for step in plan:
 | `evaluate_payload()` | evaluate | prints engine / view_transform / exposure to compare vs the reference |
 | `correct_payload(sun_energy=..., exposure=...)` | correct | nudges exposure and/or the sun's energy |
 | `save_payload(blend_path)` | save | `bpy.ops.wm.save_as_mainfile(...)` |
+| `one_shot_payload(...)` | baseline | backup + build + two renders + save + report + validation |
+| `iteration_payload(...)` | checkpoint | freezes comparable PNG + BLEND for one scored iteration |
+| `restore_checkpoint_payload(...)` | rollback | opens the best scored checkpoint |
+| `validate_payload(...)` | acceptance | fails loudly for missing camera/content/files |
 
 For a quick per-iteration preview, `get_viewport_screenshot` (the blender-mcp tool)
 is fastest; use `render_payload(...)` when you want a real EEVEE/Cycles frame to

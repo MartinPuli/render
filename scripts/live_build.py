@@ -40,11 +40,22 @@ def build(scene_path, heading=None, sv_xy=(0.0, 0.0), height=2.5, fov=90.0,
 
     cx, cy, R = bb.build_scene(scene)
     street_level = heading is not None
-    bb.setup_world(sky=street_level)   # cielo fisico realista a nivel de calle
+    scene_kind = scene.get("scene_kind", "urban")
+    # El cielo fisico + un SUN explicito sobreexpone tomas aereas en algunas
+    # combinaciones Cycles/Blender. Mantenerlo solo para street-level.
+    bb.setup_world(sky=street_level)
     if not street_level:
-        bb.setup_sun()                 # con cielo fisico el sol ya viene del cielo
+        bb.setup_sun()
 
     if street_level:
+        # Evitar una camara dentro de un edificio. Si el caller pasa una posicion
+        # explicitamente segura, el helper no la modifica.
+        try:
+            import citycamera
+            sv_xy, _moved = citycamera.safe_street_point(
+                scene, float(sv_xy[0]), float(sv_xy[1]))
+        except Exception:
+            _moved = False
         bb.setup_streetview_camera(float(heading), float(fov), float(height),
                                    float(sv_xy[0]), float(sv_xy[1]))
     else:
@@ -75,8 +86,11 @@ def build(scene_path, heading=None, sv_xy=(0.0, 0.0), height=2.5, fov=90.0,
         "buildings": len(scene.get("buildings", [])),
         "roads": len(scene.get("roads", [])),
         "areas": len(scene.get("areas", [])),
+        "special_features": len(scene.get("special_features", [])),
+        "scene_kind": scene_kind,
         "radius_m": round(R, 1),
         "center_latlon": [scene["center"]["lat"], scene["center"]["lon"]],
+        "camera_moved_to_safe_point": bool(_moved) if street_level else False,
     }
 
 
