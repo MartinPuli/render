@@ -1,0 +1,4 @@
+interface:
+  display_name: "GeoBlender"
+  short_description: "Editable real places with held-out QA"
+  default_prompt: "Use $geoblender to construct this place as editable Blender blocks, refine source-aware buildings and colors, and validate them on held-out views."

@@ -1,4 +1,4 @@
-"""Concise shared logger for maps-to-3d (pure module, no bpy)."""
+"""Concise shared logger for geoblender (pure module, no bpy)."""
 import logging
 import os
 

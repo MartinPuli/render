@@ -2,18 +2,18 @@
 
 Avoid repeated Overpass queries across runs. Keys normally use ``key_hash`` of
 the query text; values are raw response strings. The directory is created lazily
-on the first write. ``MAPS3D_CACHE`` overrides ``~/.cache/maps-to-3d``.
+on the first write. ``GEOBLENDER_CACHE`` overrides ``~/.cache/geoblender``.
 """
 import hashlib
 import os
 
 
 def cache_dir():
-    """Return the cache directory from MAPS3D_CACHE or the user cache."""
-    env = os.environ.get("MAPS3D_CACHE")
+    """Return the cache directory from GEOBLENDER_CACHE or the user cache."""
+    env = os.environ.get("GEOBLENDER_CACHE")
     if env:
         return os.path.expanduser(env)
-    return os.path.join(os.path.expanduser("~"), ".cache", "maps-to-3d")
+    return os.path.join(os.path.expanduser("~"), ".cache", "geoblender")
 
 
 def key_hash(text):

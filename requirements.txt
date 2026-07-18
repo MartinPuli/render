@@ -1,4 +1,4 @@
-# Dependencias de la skill maps-to-3d
+# Dependencias de la skill geoblender
 requests>=2.28
 
 # Blender headless como modulo de Python (opcional: alternativa al binario Blender).

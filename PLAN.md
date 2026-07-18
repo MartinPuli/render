@@ -1,4 +1,4 @@
-# Plan: a robust open-source maps-to-3d tool
+# Plan: a robust open-source geoblender tool
 
 Preserve the Blender MCP loop:
 

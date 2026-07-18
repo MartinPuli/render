@@ -1,4 +1,4 @@
-"""Pure, reproducible state for the maps-to-3d engineering loop.
+"""Pure, reproducible state for the geoblender engineering loop.
 
 This module does not import bpy. The agent evaluates each render/reference pair,
 records scores and defects, applies one change family, and uses ``decision`` to
