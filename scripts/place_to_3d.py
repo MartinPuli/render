@@ -50,7 +50,7 @@ OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.osm.jp/api/interpreter",
 ]
-USER_AGENT = "maps-to-3d-blender-skill/1.0 (OSM data; educational)"
+USER_AGENT = "geoblender-blender-skill/1.0 (OSM data; educational)"
 
 # ---------------------------------------------------------------------------
 # 1) Resolve the place -> (latitude, longitude, label)
@@ -119,7 +119,7 @@ def resolve_location(text, api_key=None):
         try:
             resp = requests.get(
                 text, allow_redirects=True, timeout=30,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; maps-to-3d/1.0)"},
+                headers={"User-Agent": "Mozilla/5.0 (compatible; geoblender/1.0)"},
             )
             final_url = resp.url
             body = resp.text

@@ -1,9 +1,9 @@
 ---
-name: maps-to-3d
+name: geoblender
 description: Constructs and refines an editable block-based Blender scene from an address, coordinates, Google Maps link, or place name. Uses normalized OpenStreetMap geometry and source-aware building appearance, then evaluates silhouette, facade structure, and color on tuning and held-out views. Use when the user wants to reconstruct, inspect, measure, detail, or render a real place in 3D through Blender or blender-mcp. This skill never uses Google Photorealistic 3D Tiles, screenshots, image planes, or provider imagery as construction geometry.
 ---
 
-# Maps to 3D
+# GeoBlender
 
 Construct a georeferenced, editable block scene in meters and preserve the
 provenance of every value. Never replace construction with a provider mesh,

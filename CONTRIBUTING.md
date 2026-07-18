@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in improving maps-to-3d. This project turns a place (via
+Thanks for your interest in improving geoblender. This project turns a place (via
 OpenStreetMap) into a procedural 3D city scene in Blender. Below is everything you need to
 get set up, run the tests, and extend the three main content systems.
 

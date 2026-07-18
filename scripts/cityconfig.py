@@ -1,4 +1,4 @@
-"""Configuration loader for maps-to-3d (pure module, no bpy).
+"""Configuration loader for geoblender (pure module, no bpy).
 
 Precedence is DEFAULTS < config file < environment variables. JSON is always
 supported; YAML is optional through PyYAML. Missing or malformed files fall back
@@ -14,7 +14,7 @@ DEFAULTS = {
     "engine": "cycles",     # Blender engine
     "texture_dir": None,    # env MAPS3D_TEXTURES
     "hdri": None,           # env MAPS3D_HDRI
-    "cache_dir": None,      # env MAPS3D_CACHE
+    "cache_dir": None,      # env GEOBLENDER_CACHE
 }
 
 # Environment override map: env -> (config key, caster).
@@ -24,7 +24,7 @@ ENV_OVERRIDES = {
     "MAPS3D_ENGINE": ("engine", str),
     "MAPS3D_TEXTURES": ("texture_dir", str),
     "MAPS3D_HDRI": ("hdri", str),
-    "MAPS3D_CACHE": ("cache_dir", str),
+    "GEOBLENDER_CACHE": ("cache_dir", str),
 }
 
 

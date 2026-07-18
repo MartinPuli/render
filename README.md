@@ -1,4 +1,4 @@
-# maps-to-3d: real places to Blender scenes
+# geoblender: real places to Blender scenes
 
 Give it a Google Maps link, coordinates, or a place name and it constructs an
 editable block-based 3D scene in Blender. The main contribution is the agent loop:
@@ -12,7 +12,7 @@ The live Blender control layer is built on
 **Siddharth Ahuja** and released under the **MIT License**.
 
 We did **not** create the Blender MCP addon, MCP server, transport, or its native
-tools. This repository contributes the `maps-to-3d` and `blender-mcp-loop`
+tools. This repository contributes the `geoblender` and `blender-mcp-loop`
 skills, the geographic data/modeling pipeline, safe live-Blender orchestration,
 checkpointing, and the visual evaluation loop that run on top of that upstream
 project. The upstream addon/server is not vendored here.
@@ -82,7 +82,7 @@ python3 -m pytest tests/ -q
 ```
 
 Environment configuration: `MAPS3D_RADIUS`, `MAPS3D_SAMPLES`,
-`MAPS3D_ENGINE`, `MAPS3D_TEXTURES`, `MAPS3D_HDRI`, `MAPS3D_CACHE`, and
+`MAPS3D_ENGINE`, `MAPS3D_TEXTURES`, `MAPS3D_HDRI`, `GEOBLENDER_CACHE`, and
 `MAPS3D_LOGLEVEL`. OSM responses are cached to avoid repeated Overpass queries.
 When a dense bbox overloads Overpass, acquisition automatically retries four
 deduplicated quadrants and then the official OSM map API with recursive node-limit
@@ -213,7 +213,7 @@ See [the full evaluation protocol](EVALUATION.md) and
 |---|---|
 | Blender addon, MCP server, connection protocol, native Blender MCP tools | [ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp) |
 | Place resolution, OSM normalization, block construction, optional procedural OSM rendering | This repository |
-| `maps-to-3d` and `blender-mcp-loop` skill instructions | This repository |
+| `geoblender` and `blender-mcp-loop` skill instructions | This repository |
 | Safe-clear wrappers, checkpoints, scoring, restore logic, block QA | This repository |
 
 ## Roadmap

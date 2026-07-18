@@ -16,7 +16,7 @@ import citylog     # noqa: E402
 import citycache   # noqa: E402
 
 _ENV_KEYS = (
-    "MAPS3D_TEXTURES", "MAPS3D_HDRI", "MAPS3D_CACHE",
+    "MAPS3D_TEXTURES", "MAPS3D_HDRI", "GEOBLENDER_CACHE",
     "MAPS3D_RADIUS", "MAPS3D_SAMPLES", "MAPS3D_ENGINE",
 )
 
@@ -89,12 +89,12 @@ def test_logger_idempotent_no_duplicate_handlers():
 # --- citycache: round trip in a temporary directory ---
 def test_cache_dir_honors_env(monkeypatch, tmp_path):
     target = str(tmp_path / "mycache")
-    monkeypatch.setenv("MAPS3D_CACHE", target)
+    monkeypatch.setenv("GEOBLENDER_CACHE", target)
     assert citycache.cache_dir() == target
 
 
 def test_cache_put_then_get_roundtrip(monkeypatch, tmp_path):
-    monkeypatch.setenv("MAPS3D_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("GEOBLENDER_CACHE", str(tmp_path / "cache"))
     key = citycache.key_hash("overpass:[out:json];node(1);out;")
     assert citycache.get(key) is None          # not created yet
     path = citycache.put(key, "RESPONSE-BODY")  # lazily creates the directory
