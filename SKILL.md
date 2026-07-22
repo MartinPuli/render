@@ -69,6 +69,45 @@ Keep the core independent from any single run:
 Concrete OSM categories such as `aeroway=runway`, `building=grandstand`, or
 `memorial=obelisk` are reusable domain semantics; a specific identity is not.
 
+## Measurement contract
+
+Real places have published dimensions. Find them before modelling, not after the
+render looks wrong. This applies to every subject the skill builds — a stadium, a
+tower, a monument, a bridge, a block of housing — and it is the difference
+between a model of the thing and a model of its category.
+
+- **Source the numbers first.** Wikipedia infoboxes, the owner's or operator's own
+  site, the architect's project page, the manufacturer's data sheet for repeated
+  components, and the governing body's regulations for anything sporting. Ten
+  minutes of searching beats an hour of nudging vertices, and unlike the nudging
+  it is reusable.
+- **Write them into `style.json` with their provenance**, so the next run and the
+  evaluator both inherit the evidence instead of re-deriving it. A number nobody
+  can trace is indistinguishable from a guess.
+- **Derive from the right datum.** Most geometry errors are not bad arithmetic;
+  they are the correct arithmetic applied to the wrong reference. A canopy is
+  positioned relative to the seating it covers, not to the structural envelope
+  around it. An outer shell is not derivable from the object it encloses if the
+  two have different shapes. When a value is derived, name what it is derived
+  *from* and check that it is the thing a builder would have measured.
+- **Prefer relations to absolutes.** "The roof clears the last row by 4-10 m"
+  survives a change of scale, style or subject; "the roof is at z = 22.2" does
+  not. Relations are also the only form the evaluator can check, because it has
+  no idea what the right absolute height is.
+- **Measure what you built, not what you intended.** Print the number and compare
+  it against the source. Intent lives in the code; the mesh is the deliverable.
+  Where the subject is rotated relative to the world axes, measure in the
+  subject's own frame — an axis-aligned bounding box of a rotated object is wrong
+  by construction, not approximately right.
+- **Where the model cannot be measured against a source, say so** in the run
+  report rather than letting a plausible invention pass as fact.
+
+Gate the relations, not the counts. Counting gates certify that a build has parts
+and that they do not intersect; they cannot tell whether the parts are in the
+right place with respect to each other, which is what makes a reconstruction
+recognisable. See `football-stadium-to-3d/SKILL.md` for the worked case where
+every counting gate passed on a visibly broken build.
+
 ## Preflight
 
 1. Resolve the place to latitude/longitude and choose a radius suitable for the
