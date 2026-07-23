@@ -176,6 +176,16 @@ do not eyeball it.
 9. **Cameras clear the structure.** After any roof or rake change, re-check every
    frozen camera: one inside the canopy renders pure black.
 
+### Lateral stands and the pitch apron
+
+Treat each long-side stand as a different operational building, not as a rotated
+copy of one seating surface. Read
+[references/LATERAL_STANDS_AND_APRONS.md](references/LATERAL_STANDS_AND_APRONS.md)
+whenever the task includes plateas, a player tunnel, integrated dugouts,
+broadcast/press seating, seat-written identity, or the grey/white border around
+the grass. The reference defines the required geometry, seat-mask method,
+apron bands, and low-field/aerial validation views.
+
 Known generator trap: `Stadium_Vomitories` does not contain only vomitories. The
 `tier_break` branch emits the tier-break overlay plates into the same bmesh, so
 the object holds hundreds of flat 0.04 m plates wrapping most of the ring
@@ -210,7 +220,8 @@ Never reset factory settings or replace the stadium with provider photogrammetry
 
 ## Completion
 
-Deliver the editable `.blend`, oblique/aerial/holdout renders,
+Deliver the editable `.blend`, oblique/aerial/holdout renders and, when lateral
+stands or the pitch border are in scope, one low field-side view per long side,
 `build_report.json`, and `eval_report.json`. Require all declared gates to pass,
 walk the fidelity checklist with its measured numbers, and visually inspect both
 tuning and holdout views. Report inferred seat rows, roofs, supports, and
